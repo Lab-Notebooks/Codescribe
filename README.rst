@@ -201,9 +201,9 @@ Following is a breif overview of different commands:
 
       ▶ code-scribe translate <filelist> -m openai -p <seed_prompt.toml>
 
-Ensure that the environment variable `OPENAI_API_KEY` is set with your
-OpenAI API key. You can set it by running the following command in your
-terminal:
+   Ensure that the environment variable `OPENAI_API_KEY` is set with
+   your OpenAI API key. You can set it by running the following command
+   in your terminal:
 
    .. code::
 
@@ -222,35 +222,15 @@ terminal:
 
       pip install transformers torch
 
-Then specify the path to the pre-trained model using the `-m` flag in
-the command. For example, to use a GPT-2 model:
+   Then specify the path to the pre-trained model using the `-m` flag in
+   the command. For example, to use a GPT-2 model:
 
    .. code::
 
       ▶ code-scribe translate <filelist> -m <path_to_model> -p <seed_prompt.toml>
 
 You can download a model from the Hugging Face model hub by visiting
-   `https://huggingface.co/models` and choosing one that fits your
-   needs.
-
-#. **Llama Model**: Code-Scribe also supports Llama models through the
-   `LlamaModel` class. To integrate a Llama model, you need to ensure
-   that the model checkpoint directory contains the required files, such
-   as the `tokenizer.model`.
-
-   If you have a local Llama model, specify the path to the model
-   checkpoint directory like so:
-
-   .. code::
-
-      ▶ code-scribe translate <filelist> -m <path_to_llama_model> -p <seed_prompt.toml>
-
-Ensure that the necessary dependencies are installed for Llama
-   models, such as:
-
-   .. code::
-
-      pip install llama
+`https://huggingface.co/models` and choosing one that fits your needs.
 
 #. **Saving Custom Prompts**: After selecting a model and running the
    translation command, you can also save the generated prompts for
