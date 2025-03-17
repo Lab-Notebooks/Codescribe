@@ -99,9 +99,9 @@ understanding of their functionality
      --help         Show this message and exit.
 
    Commands:
-     draft      Perform a draft conversion from Fortran to C++ 
-     index      Index Fortran files along a project directory tree 
-     inspect    Perform a generative AI inspection on Fortran files 
+     draft      Perform a draft conversion from Fortran to C++
+     index      Index Fortran files along a project directory tree
+     inspect    Perform a generative AI inspection on Fortran files
      translate  Perform a generative AI conversion of Fortran files
 
 Following is a breif overview of different commands:
@@ -139,8 +139,8 @@ Following is a breif overview of different commands:
    saved with a ``.scribe`` extension and include prompts tailored to
    each statement in the original source code.
 
-#. ``code-scribe translate <filelist> -m <model_name_or_path> -p <seed_prompt.toml>``:
-   This command performs neural translation using
+#. ``code-scribe translate <filelist> -m <model_name_or_path> -p
+   <seed_prompt.toml>``: This command performs neural translation using
    generative AI. You can either download a model locally from
    huggingface and provide it as an option to ``-m`` or you can simply
    set ``-m openai`` to use OpenAI API to perform code translation. Note
@@ -173,20 +173,98 @@ Following is a breif overview of different commands:
       role = "user"
       content = "<Append code from a source file>"
 
-#. ``code-scribe translate <filelist> -p <seed_prompt.toml> --save-prompts``:
-   This command allows generation of file specific
+#. ``code-scribe translate <filelist> -p <seed_prompt.toml>
+   --save-prompts``: This command allows generation of file specific
    json chat template that one can copy/paste to chat interfaces like
    that of ChatGPT to generate the source code. The json files are
    created from the seed prompt file and appended with source and draft
    code.
 
-#. ``code-scribe inspect <filelist> -q <query_prompt> -m <model_name_or_path>``:
-   Perform a query on a set of source files
+#. ``code-scribe inspect <filelist> -q <query_prompt> -m
+   <model_name_or_path>``: Perform a query on a set of source files
    using a single prompt. This is useful for navigating and
    understanding the source code.
 
 #. ``code-scribe inspect <filelist> -q <query_prompt> --save-prompts``:
    Create a scribe.json that you can copy/paste to chat interfaces.
+
+***************************
+ Integrating LLM of Choice
+***************************
+
+#. **OpenAI Model**: Code-Scribe supports OpenAI's GPT models (such as
+   `gpt-4`, `gpt-3.5-turbo`, etc.) via the OpenAI API. To use OpenAI's
+   models, specify `-m openai` in the `translate` command, as shown
+   below:
+
+   .. code::
+
+        ▶ code-scribe translate <filelist> -m openai -p <seed_prompt.toml>
+
+      Ensure that the environment variable `OPENAI_API_KEY` is set with your OpenAI API key. You can set it by running the following command in your terminal:
+
+   .. code::
+
+      export OPENAI_API_KEY="your_openai_api_key_here"
+
+#. **Hugging Face Transformers (TFModel)**: If you want to use a Hugging
+   Face model, such as those found on the Hugging Face model hub (e.g.,
+   GPT, BERT), you can specify the path to the pre-trained model or use
+   a model directly from the Hugging Face library. Code-Scribe supports
+   this integration with the `TFModel` class.
+
+   To use a Hugging Face model, first install the necessary libraries if
+   not already installed:
+
+   .. code::
+
+      pip install transformers torch
+
+   Then specify the path to the pre-trained model using the `-m` flag in
+   the command. For example, to use a GPT-2 model:
+
+   .. code::
+
+      ▶ code-scribe translate <filelist> -m <path_to_model> -p <seed_prompt.toml>
+
+   You can download a model from the Hugging Face model hub by visiting
+   `https://huggingface.co/models` and choosing one that fits your
+   needs.
+
+#. **Llama Model**: Code-Scribe also supports Llama models through the
+   `LlamaModel` class. To integrate a Llama model, you need to ensure
+   that the model checkpoint directory contains the required files, such
+   as the `tokenizer.model`.
+
+   If you have a local Llama model, specify the path to the model
+   checkpoint directory like so:
+
+   .. code::
+
+      ▶ code-scribe translate <filelist> -m <path_to_llama_model> -p <seed_prompt.toml>
+
+   Ensure that the necessary dependencies are installed for Llama
+   models, such as:
+
+   .. code::
+
+      pip install llama
+
+#. **Saving Custom Prompts**: After selecting a model and running the
+   translation command, you can also save the generated prompts for
+   later use. Use the `--save-prompts` flag to store the prompts in a
+   JSON format. This is useful if you want to copy and paste the prompts
+   into an external tool, like ChatGPT, for further refinement.
+
+   .. code::
+
+      ▶ code-scribe translate <filelist> -m openai -p <seed_prompt.toml> --save-prompts
+
+   The saved prompts will be stored in a `scribe.json` file.
+
+By following these steps, you can integrate any of the supported
+language models into Code-Scribe and use them for incremental
+translation of Fortran codebases to C++.
 
 **********
  Citation
