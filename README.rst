@@ -209,11 +209,17 @@ Following is a breif overview of different commands:
 
       export OPENAI_API_KEY="your_openai_api_key_here"
 
+   And you have installed the openai library
+
+   .. code::
+
+      pip install openai
+
 #. **Hugging Face Transformers (TFModel)**: If you want to use a Hugging
    Face model, such as those found on the Hugging Face model hub (e.g.,
-   GPT, BERT), you can specify the path to the pre-trained model or use
-   a model directly from the Hugging Face library. Code-Scribe supports
-   this integration with the `TFModel` class.
+   Mistral, Llama), you can specify the path to the pre-trained model or
+   use a model directly from the Hugging Face library. Code-Scribe
+   supports this integration with the `TFModel` class.
 
    To use a Hugging Face model, first install the necessary libraries if
    not already installed:
@@ -246,7 +252,8 @@ You can download a model from the Hugging Face model hub by visiting
 
 By following these steps, you can integrate any of the supported
 language models into Code-Scribe and use them for incremental
-translation of Fortran codebases to C++.
+translation of Fortran codebases to C++. Please the source file
+`lib/_llm.py` to view the source code.
 
 **********
  Citation
