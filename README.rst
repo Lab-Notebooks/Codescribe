@@ -20,7 +20,8 @@ the Transformers API and create custom prompts tailored to the specific
 needs of the source code.
 
 Read the paper: https://arxiv.org/abs/2410.24119
-Tuotrials: https://anl.box.com/s/zv3zdbphqprdz8rjh1c84xpeqd8yg32u
+
+Tutorials: https://anl.box.com/s/zv3zdbphqprdz8rjh1c84xpeqd8yg32u
 
 **************
  Key Features
