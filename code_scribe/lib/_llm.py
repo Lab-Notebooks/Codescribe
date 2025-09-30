@@ -3,8 +3,8 @@
 # Import libraries
 import re
 import os, sys, toml, importlib, json
-
-from typing import Optional
+import requests
+from typing import Optional, List, Dict
 from alive_progress import alive_bar
 
 from code_scribe import lib
@@ -63,6 +63,84 @@ class OpenAIModel:
 
         return response.choices[0].message.content
 
+
+class KimiModel:
+    """
+    Client for a locally hosted OpenAI-compatible Chat Completions API.
+
+    Expects the API key in env var: KIMI_API_KEY
+    Default endpoint:
+      http://llm.ai.r-ccs.riken.jp:11434/kimi/v1/chat/completions
+    Default model:
+      moonshotai/Kimi-K2-Instruct
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        endpoint: str = "http://llm.ai.r-ccs.riken.jp:11434/kimi/v1/chat/completions",
+        model: str = "moonshotai/Kimi-K2-Instruct",
+        outputs: int = 1,
+        max_tokens: int = 4096,
+        timeout: int = 120,
+    ):
+        self.api_key = api_key or os.getenv("KIMI_API_KEY")
+        if not self.api_key:
+            raise ValueError(
+                "KIMI_API_KEY is not set. Provide api_key=... or set the env var KIMI_API_KEY."
+            )
+
+        self.endpoint = endpoint
+        self.model = model
+        self.outputs = outputs
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+
+        self._session = requests.Session()
+        self._headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def chat(self, chat_template: List[Dict[str, str]]) -> str:
+        """
+        Send messages to the chat completion endpoint.
+
+        Parameters
+        ----------
+        chat_template : list[dict]
+            OpenAI-style messages, e.g.:
+            [
+              {"role": "system", "content": "You are helpful."},
+              {"role": "user", "content": "Hello!"}
+            ]
+
+        Returns
+        -------
+        str
+            The assistant's reply (first choice).
+        """
+        payload = {
+            "model": self.model,
+            "messages": chat_template,
+            "max_tokens": self.max_tokens,
+            "n": self.outputs,
+        }
+
+        resp = self._session.post(
+            self.endpoint, headers=self._headers, json=payload, timeout=self.timeout
+        )
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}") from e
+
+        data = resp.json()
+
+        try:
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(f"Unexpected response format: {data}") from e
 
 class TFModel:
     def __init__(self, checkpoint_dir):
@@ -217,7 +295,8 @@ def prompt_inspect(
 
         elif model.lower() == "openai":
             neural_model = OpenAIModel()
-
+        elif model.lower() == "kimi":    
+            neural_model = KimiModel()
         else:
             raise ValueError(f"{model} not available")
 
