@@ -37,5 +37,12 @@ def inspect(filelist, query_prompt, model, save_prompts=False):
     """
     file_index = {}  # lib.create_file_indexes()
     lib.prompt_inspect(
-        filelist, query_prompt, file_index, model=model, save_prompts=save_prompts
-    )
+        filelist, query_prompt, file_index, model=model, save_prompts=save_prompts)
+
+def generate(seed_prompt, model, save_prompts=False):
+    """
+    API command for creating a draft files
+    """
+    lib.prompt_generate( seed_prompt, model=model, save_prompts=save_prompts)
+
+        

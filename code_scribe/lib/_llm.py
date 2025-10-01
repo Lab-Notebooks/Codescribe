@@ -353,3 +353,39 @@ def prompt_inspect(
     if neural_model:
         result = neural_model.chat(chat_template)
         print(result)
+
+
+def prompt_generate(
+    seed_prompt, model=None, save_prompts=False
+):
+    """
+    Perform code understanding
+    """
+    neural_model = None
+
+    if model:
+        print("Performing neural inspection")
+
+        if os.path.exists(model):
+            neural_model = TFModel(model)
+
+        elif model.lower() == "openai":
+            neural_model = OpenAIModel()
+        elif model.lower() == "kimi":    
+            neural_model = KimiModel()
+        else:
+            raise ValueError(f"{model} not available")
+
+    if save_prompts:
+        print("Saving prompts to scribe.json")
+
+    chat_template = toml.load(seed_prompt)["chat"]
+
+ 
+    if save_prompts:
+        with open("scribe.json", "w") as pdest:
+            json.dump(chat_template, pdest, indent=4)
+
+    if neural_model:
+        result = neural_model.chat(chat_template)
+        print(result)
