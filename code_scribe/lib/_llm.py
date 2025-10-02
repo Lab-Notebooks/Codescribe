@@ -142,6 +142,78 @@ class KimiModel:
         except (KeyError, IndexError) as e:
             raise RuntimeError(f"Unexpected response format: {data}") from e
 
+class qwenModel:
+    """
+    Client for a locally hosted OpenAI-compatible Chat Completions API.
+
+    Expects the API key in env var: KIMI_API_KEY
+    Default endpoint:
+      http://llm.ai.r-ccs.riken.jp:11434/kimi/v1/chat/completions
+    Default model:
+      moonshotai/Kimi-K2-Instruct
+    """
+
+    def __init__(
+        self,
+        endpoint: str = "http://llm.ai.r-ccs.riken.jp:11434/v1/chat/completions",
+        model: str = "qwen3-coder:30b",
+        outputs: int = 1,
+        max_tokens: int = 4096,
+        timeout: int = 120,
+    ):
+
+        self.endpoint = endpoint
+        self.model = model
+        self.outputs = outputs
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+
+        self._session = requests.Session()
+        self._headers = {
+            "Content-Type": "application/json",
+        }
+
+    def chat(self, chat_template: List[Dict[str, str]]) -> str:
+        """
+        Send messages to the chat completion endpoint.
+
+        Parameters
+        ----------
+        chat_template : list[dict]
+            OpenAI-style messages, e.g.:
+            [
+              {"role": "system", "content": "You are helpful."},
+              {"role": "user", "content": "Hello!"}
+            ]
+
+        Returns
+        -------
+        str
+            The assistant's reply (first choice).
+        """
+        payload = {
+            "model": self.model,
+            "messages": chat_template,
+            "max_tokens": self.max_tokens,
+            "n": self.outputs,
+        }
+
+        resp = self._session.post(
+            self.endpoint, headers=self._headers, json=payload, timeout=self.timeout
+        )
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}") from e
+
+        data = resp.json()
+
+        try:
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(f"Unexpected response format: {data}") from e
+
+        
 class TFModel:
     def __init__(self, checkpoint_dir):
         transformers = importlib.import_module("transformers")
@@ -373,6 +445,8 @@ def prompt_generate(
             neural_model = OpenAIModel()
         elif model.lower() == "kimi":    
             neural_model = KimiModel()
+        elif model.lower() == "qwen":    
+            neural_model = qwenModel()
         else:
             raise ValueError(f"{model} not available")
 
