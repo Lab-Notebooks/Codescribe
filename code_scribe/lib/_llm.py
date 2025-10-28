@@ -65,9 +65,10 @@ class OpenAIModel:
 
 
 class ArgoModel:
-    def __init__(self):
+    def __init__(self, model):
         self.api_endpoint = os.getenv("ARGO_API_ENDPOINT")
         self.user = os.getenv("ARGO_USER")
+        self.model = model
 
     def chat(self, chat_template):
 
@@ -80,7 +81,7 @@ class ArgoModel:
         # Data to be sent as a POST in JSON format
         data = {
             "user": self.user,
-            "model": "gpt35",
+            "model": self.model,
             "system": "You are a large language model with the name Argo.",
             "prompt": [prompt_text],
             "stop": [],
@@ -156,8 +157,8 @@ def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
         elif model.lower() == "openai":
             neural_model = OpenAIModel()
 
-        elif model.lower() == "argo":
-            neural_model = ArgoModel()
+        elif model.lower().startswith("argo-"):
+            neural_model = ArgoModel(model.lower().strip("argo")[1:])
 
         else:
             raise ValueError(f"{model} not available")
@@ -263,8 +264,8 @@ def prompt_inspect(
         elif model.lower() == "openai":
             neural_model = OpenAIModel()
 
-        elif model.lower() == "argo":
-            neural_model = ArgoModel()
+        elif model.lower().startswith("argo-"):
+            neural_model = ArgoModel(model.lower().strip("argo")[1:])
 
         else:
             raise ValueError(f"{model} not available")
