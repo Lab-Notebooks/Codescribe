@@ -2,7 +2,7 @@
 
 # Import libraries
 import re
-import os, sys, toml, importlib, json
+import os, sys, toml, importlib, json, requests
 
 from typing import Optional
 from alive_progress import alive_bar
@@ -64,6 +64,48 @@ class OpenAIModel:
         return response.choices[0].message.content
 
 
+class ArgoModel:
+    def __init__(self):
+        self.api_endpoint = os.getenv("ARGO_API_ENDPOINT")
+        self.user = os.getenv("ARGO_USER")
+
+    def chat(self, chat_template):
+
+        # Combine all role/content pairs into a single text block
+        prompt_text = "\n\n".join(
+            f"{item['role'].capitalize()}: {item['content'].strip()}"
+            for item in chat_template
+        )
+
+        # Data to be sent as a POST in JSON format
+        data = {
+            "user": self.user,
+            "model": "gpt35",
+            "system": "You are a large language model with the name Argo.",
+            "prompt": [prompt_text],
+            "stop": [],
+            "temperature": 0.1,
+            "top_p": 0.9,
+        }
+
+        response = requests.post(
+            self.api_endpoint,
+            data=json.dumps(data),
+            headers={"Content-Type": "application/json"},
+        )
+
+        return response.json()["response"]
+
+
+class PerplexityModel:
+    def __init__(self):
+        perplexity = importlib.import_module("perplexity")
+        self.pipeline = perplexity.Perplexity()
+
+    def chat(self, chat_template):
+        pass
+
+
 class TFModel:
     def __init__(self, checkpoint_dir):
         transformers = importlib.import_module("transformers")
@@ -113,6 +155,9 @@ def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
 
         elif model.lower() == "openai":
             neural_model = OpenAIModel()
+
+        elif model.lower() == "argo":
+            neural_model = ArgoModel()
 
         else:
             raise ValueError(f"{model} not available")
@@ -217,6 +262,9 @@ def prompt_inspect(
 
         elif model.lower() == "openai":
             neural_model = OpenAIModel()
+
+        elif model.lower() == "argo":
+            neural_model = ArgoModel()
 
         else:
             raise ValueError(f"{model} not available")

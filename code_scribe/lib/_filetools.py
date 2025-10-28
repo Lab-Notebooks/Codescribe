@@ -116,9 +116,9 @@ def create_file_indexes():
     return file_index
 
 
-def filter_file_indexes(sfile, file_index):
+def filter_file_indexes(sfile, file_index, scalar_functions=[]):
     """
-    Extract modules and subroutines used in the given Fortran source file,
+    Extract modules, subroutines, and variable declarations used in the given Fortran source file,
     and return a subset of the file_index that corresponds to these.
 
     Args:
@@ -126,38 +126,101 @@ def filter_file_indexes(sfile, file_index):
         file_index (dict): The complete item index list to filter from.
 
     Returns:
-        dict: A subset of the file_index containing only the used modules and subroutines.
+        dict: A subset of the file_index containing only the used modules, subroutines, and variables.
     """
     used_modules = set()
     used_subroutines = set()
 
     # Open and read the source file
-    with open(sfile, "r") as source:
-        for line in source.readlines():
-            stripped_line = line.strip()
+    try:
+        with open(sfile, "r") as source:
+            for line in source:
+                stripped_line = line.strip()
 
-            # Check for 'use' statement to capture modules
-            module_match = re.match(r"^\s*use\s+(\w+)", stripped_line, re.IGNORECASE)
-            if module_match:
-                module_name = module_match.group(1).lower()
-                used_modules.add(module_name)
+                # Check for 'use' statement to capture modules
+                module_match = re.match(
+                    r"^\s*use\s+(\w+)", stripped_line, re.IGNORECASE
+                )
+                if module_match:
+                    used_modules.add(module_match.group(1).lower())
 
-            # Check for 'call' statement to capture subroutines
-            subroutine_match = re.match(
-                r"^\s*call\s+(\w+)", stripped_line, re.IGNORECASE
-            )
-            if subroutine_match:
-                subroutine_name = subroutine_match.group(1).lower()
-                used_subroutines.add(subroutine_name)
+                # Check for 'call' statement to capture subroutines
+                subroutine_match = re.match(
+                    r"^\s*call\s+(\w+)", stripped_line, re.IGNORECASE
+                )
+                if subroutine_match:
+                    used_subroutines.add(subroutine_match.group(1).lower())
 
-    # Filter the file_index to return only the modules and subroutines used in this file
+    except FileNotFoundError:
+        print(f"Error: The file '{sfile}' was not found.")
+        return {}
+    except Exception as e:
+        print(f"An error occurred while reading the file: {e}")
+        return {}
+
+    # Filter the file_index to return only the modules, subroutines, and variables used in this file
     filtered_file_index = {
         name: path
         for name, path in file_index.items()
-        if name.lower() in used_modules or name.lower() in used_subroutines
+        if name.lower() in used_modules
+        or name.lower() in used_subroutines
+        or name.lower() in [sfunc.lower() for sfunc in scalar_functions]
     }
 
     return filtered_file_index
+
+
+def isolate_scalar_functions(sfile):
+    """
+    Isolate variables that are declared as scalars but used as functions in the given Fortran source file.
+
+    Args:
+        sfile (str): The Fortran source file to analyze.
+
+    Returns:
+        set: A set of scalar variables that are used as functions.
+    """
+    scalar_variables = set()
+    function_calls = set()
+    defined_functions = set()
+
+    # Open and read the source file
+    with open(sfile, "r") as source:
+        for line in source:
+            stripped_line = line.strip()
+
+            # Check for function definitions
+            func_decl_match = re.match(
+                r"^\s*function\s+(\w+)", stripped_line, re.IGNORECASE
+            )
+            if func_decl_match:
+                defined_functions.add(func_decl_match.group(1))
+
+            # Check for scalar variable declarations
+            var_decl_match = re.match(
+                r"^\s*(integer|real|double|complex\(dp\)|bool|character)\s*::\s*([^;]*)",
+                stripped_line,
+                re.IGNORECASE,
+            )
+            if var_decl_match:
+                # Extract variable names
+                variables_part = var_decl_match.group(2)
+                variable_names = [
+                    var.strip().split("(")[0] for var in variables_part.split(",")
+                ]
+                scalar_variables.update(name for name in variable_names)
+
+            # Check for function calls
+            function_call_match = re.findall(r"\b(\w+)\s*\(", stripped_line)
+            if function_call_match:
+                function_calls.update(name for name in function_call_match)
+
+    # Identify scalar variables that are used as functions, ignoring defined functions
+    scalar_used_as_functions = (
+        scalar_variables.intersection(function_calls) - defined_functions
+    )
+
+    return scalar_used_as_functions
 
 
 def query_construct(name, file_index):
@@ -241,11 +304,19 @@ def extract_fortran_meta(sfile):
     return meta_info
 
 
-def annotate_fortran_file(sfile, *args):
+def annotate_fortran_file(sfile, file_index):
     """
     Annotates a Fortran file, converts types to C++ equivalents,
     replaces use statements inline with namespaces, and adds headers.
     """
+
+    scalar_functions = lib.isolate_scalar_functions(sfile)
+
+    filtered_file_index = {}
+    if file_index:
+        filtered_file_index.update(
+            lib.filter_file_indexes(sfile, file_index, scalar_functions)
+        )
 
     scribe_filename = os.path.splitext(sfile)[0] + ".scribe"
 
@@ -271,6 +342,14 @@ def annotate_fortran_file(sfile, *args):
         "scribe-prompt: Statement functions should be converted to equivalent lambda functions in C++. "
         + "Include [&] in capture clause to use variables by reference"
     )
+
+    for construct in scalar_functions:
+        if construct.lower() in filtered_file_index.keys():
+            prompt_lines.append(f"scribe-prompt: {construct} is an external function")
+
+    # for construct in scalar_functions:
+    #    if construct not in filtered_file_index.keys():
+    #        prompt_lines.append(f"scribe-prompt: {construct} is an array or statement function")
 
     with open(sfile, "r") as source:
         source_code = source.readlines()

@@ -16,7 +16,7 @@ def draft(fortran_files):
     """
     API command for creating a draft files
     """
-    file_index = {}  # lib.create_file_indexes()
+    file_index = lib.create_file_indexes()
 
     for sfile in fortran_files:
         message = lib.annotate_fortran_file(sfile, file_index)
