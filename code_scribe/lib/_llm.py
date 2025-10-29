@@ -68,7 +68,7 @@ class ArgoModel:
     def __init__(self, model):
 
         self.api_endpoint = os.getenv("ARGO_API_ENDPOINT")
-        if not self.endpoint:
+        if not self.api_endpoint:
             raise ValueError("ARGO_API_ENDPOINT env var is not set")
 
         self.user = os.getenv("ARGO_USER")
