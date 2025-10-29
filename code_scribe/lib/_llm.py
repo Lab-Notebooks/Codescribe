@@ -66,8 +66,15 @@ class OpenAIModel:
 
 class ArgoModel:
     def __init__(self, model):
+
         self.api_endpoint = os.getenv("ARGO_API_ENDPOINT")
+        if not self.endpoint:
+            raise ValueError("ARGO_API_ENDPOINT env var is not set")
+
         self.user = os.getenv("ARGO_USER")
+        if not self.user:
+            raise ValueError("ARGO_USER env var is not set")
+
         self.model = model
 
     def chat(self, chat_template):
