@@ -83,6 +83,43 @@ def translate(fortran_files, seed_prompt, model, save_prompts):
         )
     api.translate(fortran_files, seed_prompt, model, save_prompts)
 
+@code_scribe.command(name="generate")
+@click.option(
+    "--seed-prompt", "-p", required=True, help="TOML seed file for chat template"
+)
+@click.option(
+    "--model",
+    "-m",
+    cls=lib.MutuallyExclusiveOption,
+    help="Gen AI model name or path",
+    mutually_exclusive=["save_prompts"],
+)
+@click.option(
+    "--save-prompts",
+    "-s",
+    is_flag=True,
+    cls=lib.MutuallyExclusiveOption,
+    help="Save file specific prompts to json file",
+    mutually_exclusive=["model"],
+)
+    
+def generate(seed_prompt, model, save_prompts):
+    """
+    \b
+    Perform a generative AI generation of code in a file
+    \b
+
+    \b
+    This command applies generative AI to generate code 
+    based on specifications given in the prompt/
+    \b
+    """
+    if (not model) and (not save_prompts):
+        raise click.UsageError(
+            "Please provide either the '--model/-m' or '--save-prompts/-p' option"
+        )
+    api.generate(seed_prompt, model, save_prompts)
+    
 
 @code_scribe.command(name="inspect")
 @click.argument("fortran-files", nargs=-1, required=True)

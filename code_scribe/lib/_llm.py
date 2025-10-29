@@ -4,7 +4,7 @@
 import re
 import os, sys, toml, importlib, json, requests
 
-from typing import Optional
+from typing import Optional, List, Dict
 from alive_progress import alive_bar
 
 from code_scribe import lib
@@ -105,6 +105,161 @@ class PerplexityModel:
 
     def chat(self, chat_template):
         pass
+
+
+class KimiModel:
+    """
+    Client for a locally hosted OpenAI-compatible Chat Completions API.
+
+    Expects the API key in env var: KIMI_API_KEY
+    Expects the API endpoint in env var: KIMI_API_ENDPOINT
+
+    Default model:
+      moonshotai/Kimi-K2-Instruct
+    """
+
+    def __init__(
+        self,
+        model: str = "moonshotai/Kimi-K2-Instruct",
+        outputs: int = 1,
+        max_tokens: int = 4096,
+        timeout: int = 120,
+    ):
+        self.api_key = os.getenv("KIMI_API_KEY")
+        if not self.api_key:
+            raise ValueError("KIMI_API_KEY env var is not set")
+
+        self.endpoint = os.getenv("KIMI_API_ENDPOINT")
+        if not self.endpoint:
+            raise ValueError("KIMI_API_ENDPOINT env var is not set")
+
+        self.model = model
+        self.outputs = outputs
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+
+        self._session = requests.Session()
+        self._headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def chat(self, chat_template: List[Dict[str, str]]) -> str:
+        """
+        Send messages to the chat completion endpoint.
+
+        Parameters
+        ----------
+        chat_template : list[dict]
+            OpenAI-style messages, e.g.:
+            [
+              {"role": "system", "content": "You are helpful."},
+              {"role": "user", "content": "Hello!"}
+            ]
+
+        Returns
+        -------
+        str
+            The assistant's reply (first choice).
+        """
+        payload = {
+            "model": self.model,
+            "messages": chat_template,
+            "max_tokens": self.max_tokens,
+            "n": self.outputs,
+        }
+
+        resp = self._session.post(
+            self.endpoint, headers=self._headers, json=payload, timeout=self.timeout
+        )
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}") from e
+
+        data = resp.json()
+
+        try:
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(f"Unexpected response format: {data}") from e
+
+
+class QwenModel:
+    """
+    Client for a locally hosted OpenAI-compatible Chat Completions API.
+
+    Expects the API key in env var: KIMI_API_KEY
+    Default endpoint:
+      http://llm.ai.r-ccs.riken.jp:11434/kimi/v1/chat/completions
+    Default model:
+      moonshotai/Kimi-K2-Instruct
+    """
+
+    def __init__(
+        self,
+        model: str = "qwen3-coder:30b",
+        outputs: int = 1,
+        max_tokens: int = 4096,
+        timeout: int = 120,
+    ):
+        self.api_key = os.getenv("KIMI_API_KEY")
+        if not self.api_key:
+            raise ValueError("KIMI_API_KEY env var is not set")
+
+        self.endpoint = os.getenv("KIMI_API_ENDPOINT")
+        if not self.endpoint:
+            raise ValueError("KIMI_API_ENDPOINT env var is not set")
+
+        self.model = model
+        self.outputs = outputs
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+
+        self._session = requests.Session()
+        self._headers = {
+            "Content-Type": "application/json",
+        }
+
+    def chat(self, chat_template: List[Dict[str, str]]) -> str:
+        """
+        Send messages to the chat completion endpoint.
+
+        Parameters
+        ----------
+        chat_template : list[dict]
+            OpenAI-style messages, e.g.:
+            [
+              {"role": "system", "content": "You are helpful."},
+              {"role": "user", "content": "Hello!"}
+            ]
+
+        Returns
+        -------
+        str
+            The assistant's reply (first choice).
+        """
+        payload = {
+            "model": self.model,
+            "messages": chat_template,
+            "max_tokens": self.max_tokens,
+            "n": self.outputs,
+        }
+
+        resp = self._session.post(
+            self.endpoint, headers=self._headers, json=payload, timeout=self.timeout
+        )
+        try:
+            resp.raise_for_status()
+        except requests.HTTPError as e:
+            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}") from e
+
+        data = resp.json()
+
+        try:
+            return data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(f"Unexpected response format: {data}") from e
 
 
 class TFModel:
@@ -267,6 +422,9 @@ def prompt_inspect(
         elif model.lower().startswith("argo-"):
             neural_model = ArgoModel(model.lower().strip("argo")[1:])
 
+        elif model.lower() == "kimi":
+            neural_model = KimiModel()
+
         else:
             raise ValueError(f"{model} not available")
 
@@ -315,6 +473,41 @@ def prompt_inspect(
         chat_template[-1]["content"] += "</index>\n\n"
 
     chat_template[-1]["content"] += "\n" + f"<query>\n" + query_prompt + f"\n</query>\n"
+
+    if save_prompts:
+        with open("scribe.json", "w") as pdest:
+            json.dump(chat_template, pdest, indent=4)
+
+    if neural_model:
+        result = neural_model.chat(chat_template)
+        print(result)
+
+
+def prompt_generate(seed_prompt, model=None, save_prompts=False):
+    """
+    Perform code understanding
+    """
+    neural_model = None
+
+    if model:
+        print("Performing neural inspection")
+
+        if os.path.exists(model):
+            neural_model = TFModel(model)
+
+        elif model.lower() == "openai":
+            neural_model = OpenAIModel()
+        elif model.lower() == "kimi":
+            neural_model = KimiModel()
+        elif model.lower() == "qwen":
+            neural_model = QwenModel()
+        else:
+            raise ValueError(f"{model} not available")
+
+    if save_prompts:
+        print("Saving prompts to scribe.json")
+
+    chat_template = toml.load(seed_prompt)["chat"]
 
     if save_prompts:
         with open("scribe.json", "w") as pdest:
