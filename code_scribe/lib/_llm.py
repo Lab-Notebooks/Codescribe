@@ -303,7 +303,7 @@ class TFModel:
         return results[0]["generated_text"][-1]["content"]
 
 
-def SetNeuralModel(model):
+def _set_neural_model(model):
     """
     Set neural model based on options
     """
@@ -335,7 +335,7 @@ def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
 
     if model:
         print("Starting neural conversion process")
-        neural_model = SetNeuralModel(model)
+        neural_model = _set_neural_model(model)
 
     if save_prompts:
         print("Saving custom prompts per file")
@@ -431,7 +431,7 @@ def prompt_inspect(
 
     if model:
         print("Performing neural inspection")
-        neural_model = SetNeuralModel(model)
+        neural_model = _set_neural_model(model)
 
     if save_prompts:
         print("Saving prompts to scribe.json")
@@ -496,7 +496,7 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False):
 
     if model:
         print("Performing neural generation")
-        neural_model = SetNeuralModel(model)
+        neural_model = _set_neural_model(model)
 
     if save_prompts:
         print("Saving prompts to scribe.json")
