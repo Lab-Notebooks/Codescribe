@@ -303,27 +303,39 @@ class TFModel:
         return results[0]["generated_text"][-1]["content"]
 
 
+def SetNeuralModel(model):
+    """
+    Set neural model based on options
+    """
+    if os.path.exists(model):
+        neural_model = TFModel(model)
+
+    elif model.lower() == "openai":
+        neural_model = OpenAIModel()
+
+    elif model.lower().startswith("argo-"):
+        neural_model = ArgoModel(model.lower().strip("argo")[1:])
+
+    elif model.lower() == "kimi":
+        neural_model = KimiModel()
+
+    elif model.lower() == "qwen":
+        neural_model = QwenModel()
+
+    else:
+        raise ValueError(f"{model} not available")
+
+    return neural_model
+
 def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
     """
     perform translation using prompts and the supplied model.
     """
-
     neural_model = None
 
     if model:
         print("Starting neural conversion process")
-
-        if os.path.exists(model):
-            neural_model = TFModel(model)
-
-        elif model.lower() == "openai":
-            neural_model = OpenAIModel()
-
-        elif model.lower().startswith("argo-"):
-            neural_model = ArgoModel(model.lower().strip("argo")[1:])
-
-        else:
-            raise ValueError(f"{model} not available")
+        neural_model = SetNeuralModel(model)
 
     if save_prompts:
         print("Saving custom prompts per file")
@@ -419,21 +431,7 @@ def prompt_inspect(
 
     if model:
         print("Performing neural inspection")
-
-        if os.path.exists(model):
-            neural_model = TFModel(model)
-
-        elif model.lower() == "openai":
-            neural_model = OpenAIModel()
-
-        elif model.lower().startswith("argo-"):
-            neural_model = ArgoModel(model.lower().strip("argo")[1:])
-
-        elif model.lower() == "kimi":
-            neural_model = KimiModel()
-
-        else:
-            raise ValueError(f"{model} not available")
+        neural_model = SetNeuralModel(model)
 
     if save_prompts:
         print("Saving prompts to scribe.json")
@@ -497,19 +495,8 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False):
     neural_model = None
 
     if model:
-        print("Performing neural inspection")
-
-        if os.path.exists(model):
-            neural_model = TFModel(model)
-
-        elif model.lower() == "openai":
-            neural_model = OpenAIModel()
-        elif model.lower() == "kimi":
-            neural_model = KimiModel()
-        elif model.lower() == "qwen":
-            neural_model = QwenModel()
-        else:
-            raise ValueError(f"{model} not available")
+        print("Performing neural generation")
+        neural_model = SetNeuralModel(model)
 
     if save_prompts:
         print("Saving prompts to scribe.json")
