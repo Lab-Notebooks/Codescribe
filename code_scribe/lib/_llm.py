@@ -327,6 +327,7 @@ def _set_neural_model(model):
 
     return neural_model
 
+
 def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
     """
     perform translation using prompts and the supplied model.
@@ -344,8 +345,8 @@ def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
 
     with alive_bar(len(mapping[0]), bar="blocks") as bar:
 
-        for fsource, csource, finterface, cdraft, promptfile in zip(
-            mapping[0], mapping[1], mapping[2], mapping[3], mapping[4]
+        for fsource, csource, finterface, cdraft, promptfile, cheader in zip(
+            mapping[0], mapping[1], mapping[2], mapping[3], mapping[4], mapping[5]
         ):
 
             bar.text(fsource)
@@ -398,8 +399,13 @@ def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
                 if neural_model:
                     result = neural_model.chat(chat_template)
 
-                    with open(csource, "w") as cdest, open(finterface, "w") as fdest:
+                    with open(csource, "w") as cdest, open(
+                        finterface, "w"
+                    ) as fdest, open(cheader, "w") as chead:
 
+                        cheader = re.search(
+                            r"<cheader>(.*?)</cheader>", result, re.DOTALL
+                        )
                         csource = re.search(
                             r"<csource>(.*?)</csource>", result, re.DOTALL
                         )
@@ -411,6 +417,11 @@ def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
                             cdest.write(csource.group(1))
                         else:
                             cdest.write(result)
+
+                        if cheader:
+                            chead.write(cheader.group(1))
+                        else:
+                            chead.write(result)
 
                         if fsource:
                             fdest.write(fsource.group(1))

@@ -467,6 +467,7 @@ def create_src_mapping(filelist):
     """
     fsource = []
     csource = []
+    cheader = []
     finterface = []
     cdraft = []
     promptfile = []
@@ -474,8 +475,9 @@ def create_src_mapping(filelist):
     for sfile in filelist:
         fsource.append(sfile)
         csource.append(os.path.splitext(sfile)[0] + ".cpp")
-        finterface.append(os.path.splitext(sfile)[0] + "_fi.f90")
+        cheader.append(os.path.splitext(sfile)[0] + ".hpp")
+        finterface.append(os.path.splitext(sfile)[0] + "_fi.F90")
         cdraft.append(os.path.splitext(sfile)[0] + ".scribe")
         promptfile.append(os.path.splitext(sfile)[0] + ".json")
 
-    return fsource, csource, finterface, cdraft, promptfile
+    return fsource, csource, finterface, cdraft, promptfile, cheader
