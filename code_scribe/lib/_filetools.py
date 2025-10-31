@@ -167,6 +167,8 @@ def filter_file_indexes(sfile, file_index, scalar_functions=[]):
         or name.lower() in [sfunc.lower() for sfunc in scalar_functions]
     }
 
+    scalar_functions.update(used_subroutines)
+
     return filtered_file_index
 
 
@@ -360,6 +362,7 @@ def annotate_fortran_file(sfile, file_index):
             # Skip lines that are comments starting with 'c', '!!', or '!'
             if stripped_line.lower().startswith(("c", "!!", "!")) and (
                 not stripped_line.lower().startswith(("complex"))
+                and not stripped_line.lower().startswith(("call"))
             ):
                 continue
 
