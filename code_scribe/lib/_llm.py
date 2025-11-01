@@ -512,7 +512,25 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False):
     if save_prompts:
         print("Saving prompts to scribe.json")
 
-    chat_template = toml.load(seed_prompt)["chat"]
+    system_template = [{"role": "system", "content": ""}]
+    system_template[-1]["content"] += (
+        "You are a code generation assistant.\n"
+        + "When the user asks for code that spans multiple files,\n"
+        + "output each file enclosed within\n"
+        + "XML-style tags using the format:\n"
+        + "\n"
+        + "<filename1>\n"
+        + "... file contents ...\n"
+        + "</filename1>\n"
+        + "\n"
+        + "<filename2>\n"
+        + "... file contents ...\n"
+        + "</filename2>\n"
+        + "\n"
+        + "Do not add any explanations or commentary outside of these tags.\n"
+    )
+
+    chat_template = system_template + toml.load(seed_prompt)["chat"]
 
     if save_prompts:
         with open("scribe.json", "w") as pdest:
