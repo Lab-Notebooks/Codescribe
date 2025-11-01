@@ -12,7 +12,7 @@ from code_scribe import lib
 
 
 @code_scribe.command(name="index")
-@click.argument("root-dir", required=True)
+@click.argument("root-dir", required=True, type=click.Path(exists=True))
 def index(root_dir):
     """
     \b
@@ -30,7 +30,7 @@ def index(root_dir):
 
 
 @code_scribe.command(name="draft")
-@click.argument("fortran-files", nargs=-1, required=True)
+@click.argument("fortran-files", nargs=-1, required=True, type=click.Path(exists=True))
 def draft(fortran_files):
     """
     \b
@@ -46,7 +46,7 @@ def draft(fortran_files):
 
 
 @code_scribe.command(name="translate")
-@click.argument("fortran-files", nargs=-1, required=True)
+@click.argument("fortran-files", nargs=-1, required=True, type=click.Path(exists=True))
 @click.option(
     "--seed-prompt", "-p", required=True, help="TOML seed file for chat template"
 )
@@ -101,7 +101,14 @@ def translate(fortran_files, seed_prompt, model, save_prompts):
     help="Save file specific prompts to json file",
     mutually_exclusive=["model"],
 )
-def generate(seed_prompt, model, save_prompts):
+@click.option(
+    "--update-existing",
+    "-a",
+    type=click.Path(exists=True),
+    multiple=True,
+    help="List of file to update",
+)
+def generate(seed_prompt, model, save_prompts, update_existing):
     """
     \b
     Perform a generative AI generation of code in a file
@@ -116,11 +123,11 @@ def generate(seed_prompt, model, save_prompts):
         raise click.UsageError(
             "Please provide either the '--model/-m' or '--save-prompts/-p' option"
         )
-    api.generate(seed_prompt, model, save_prompts)
+    api.generate(seed_prompt, model, save_prompts, update_existing)
 
 
 @code_scribe.command(name="inspect")
-@click.argument("fortran-files", nargs=-1, required=True)
+@click.argument("fortran-files", nargs=-1, required=True, type=click.Path(exists=True))
 @click.option("--query-prompt", "-q", required=True, help="Query prompt")
 @click.option(
     "--model",

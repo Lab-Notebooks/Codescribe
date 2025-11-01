@@ -499,7 +499,7 @@ def prompt_inspect(
         print(result)
 
 
-def prompt_generate(seed_prompt, model=None, save_prompts=False):
+def prompt_generate(seed_prompt, model=None, save_prompts=False, update_existing=[]):
     """
     Perform code understanding
     """
@@ -514,7 +514,7 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False):
 
     system_template = [{"role": "system", "content": ""}]
     system_template[-1]["content"] += (
-        "You are a code generation assistant.\n"
+        "You are a code generation and editing assistant.\n"
         + "When the user asks for code that spans multiple files,\n"
         + "output each file enclosed within\n"
         + "XML-style tags using the format:\n"
@@ -531,6 +531,25 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False):
     )
 
     chat_template = system_template + toml.load(seed_prompt)["chat"]
+
+    if update_existing:
+        chat_template[-1]["content"] += (
+            "Update the content of following files based on\n"
+            + "the instructionis Enclose output of each file in their\n"
+            + "respective XML elements. Only updated files who content is provided.\n\n"
+        )
+
+        for filename in update_existing:
+            with open(filename, "r") as sfile:
+                source_code = []
+
+                for line in sfile.readlines():
+                    source_code.append(line)
+
+            if source_code:
+                chat_template[-1]["content"] += (
+                    "\n" + f"<{filename}>\n" + "".join(source_code) + f"</{filename}>\n"
+                )
 
     if save_prompts:
         with open("scribe.json", "w") as pdest:
