@@ -499,7 +499,7 @@ def prompt_inspect(
         print(result)
 
 
-def prompt_generate(seed_prompt, model=None, save_prompts=False):
+def prompt_generate(filename, seed_prompt, model=None, save_prompts=False):
     """
     Perform code understanding
     """
@@ -520,4 +520,11 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False):
 
     if neural_model:
         result = neural_model.chat(chat_template)
-        print(result)
+
+        with open(filename, "w") as sfile:
+            fsource = re.search(r"<source>(.*?)</source>", result, re.DOTALL)
+
+            if fsource:
+                sfile.write(fsource.group(1))
+            else:
+                sfile.write(result)
