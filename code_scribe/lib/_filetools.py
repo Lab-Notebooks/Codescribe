@@ -44,7 +44,7 @@ def create_scribe_yaml(root_directory):
         }
 
         for filename in filenames:
-            if filename.endswith((".f", ".f90", ".F90")):
+            if filename.endswith((".f", ".f90", ".F", ".F90")):
                 filepath = os.path.join(dirpath, filename)
                 fortran_info = extract_fortran_info(filepath)
 
