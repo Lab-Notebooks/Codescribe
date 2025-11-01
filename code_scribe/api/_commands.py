@@ -39,8 +39,8 @@ def inspect(filelist, query_prompt, model, save_prompts=False):
     lib.prompt_inspect(filelist, query_prompt, file_index, model=model, save_prompts=save_prompts)
 
 
-def generate(filename, seed_prompt, model, save_prompts=False):
+def generate(seed_prompt, model, save_prompts=False):
     """
     API command for creating a draft files
     """
-    lib.prompt_generate(filename, seed_prompt, model=model, save_prompts=save_prompts)
+    lib.prompt_generate(seed_prompt, model=model, save_prompts=save_prompts)

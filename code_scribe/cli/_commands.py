@@ -85,10 +85,7 @@ def translate(fortran_files, seed_prompt, model, save_prompts):
 
 
 @code_scribe.command(name="generate")
-@click.argument("filename", required=True)
-@click.option(
-    "--seed-prompt", "-p", required=True, help="TOML seed file for chat template"
-)
+@click.argument("seed-prompt", required=True)
 @click.option(
     "--model",
     "-m",
@@ -104,7 +101,7 @@ def translate(fortran_files, seed_prompt, model, save_prompts):
     help="Save file specific prompts to json file",
     mutually_exclusive=["model"],
 )
-def generate(filename, seed_prompt, model, save_prompts):
+def generate(seed_prompt, model, save_prompts):
     """
     \b
     Perform a generative AI generation of code in a file
@@ -119,7 +116,7 @@ def generate(filename, seed_prompt, model, save_prompts):
         raise click.UsageError(
             "Please provide either the '--model/-m' or '--save-prompts/-p' option"
         )
-    api.generate(filename, seed_prompt, model, save_prompts)
+    api.generate(seed_prompt, model, save_prompts)
 
 
 @code_scribe.command(name="inspect")
