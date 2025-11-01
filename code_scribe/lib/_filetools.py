@@ -116,7 +116,7 @@ def create_file_indexes():
     return file_index
 
 
-def filter_file_indexes(sfile, file_index, scalar_functions=[]):
+def filter_file_indexes(sfile, file_index, function_calls=[]):
     """
     Extract modules, subroutines, and variable declarations used in the given Fortran source file,
     and return a subset of the file_index that corresponds to these.
@@ -164,10 +164,9 @@ def filter_file_indexes(sfile, file_index, scalar_functions=[]):
         for name, path in file_index.items()
         if name.lower() in used_modules
         or name.lower() in used_subroutines
-        or name.lower() in [sfunc.lower() for sfunc in scalar_functions]
+        or name.lower() in [sfunc.lower() for sfunc in function_calls]
+        and path != os.path.abspath(sfile)
     }
-
-    scalar_functions.update(used_subroutines)
 
     return filtered_file_index
 
@@ -222,7 +221,7 @@ def isolate_scalar_functions(sfile):
         scalar_variables.intersection(function_calls) - defined_functions
     )
 
-    return scalar_used_as_functions
+    return scalar_used_as_functions, function_calls
 
 
 def query_construct(name, file_index):
@@ -312,12 +311,12 @@ def annotate_fortran_file(sfile, file_index):
     replaces use statements inline with namespaces, and adds headers.
     """
 
-    scalar_functions = lib.isolate_scalar_functions(sfile)
+    scalar_functions, function_calls = lib.isolate_scalar_functions(sfile)
 
     filtered_file_index = {}
     if file_index:
         filtered_file_index.update(
-            lib.filter_file_indexes(sfile, file_index, scalar_functions)
+            lib.filter_file_indexes(sfile, file_index, function_calls)
         )
 
     scribe_filename = os.path.splitext(sfile)[0] + ".scribe"
@@ -345,13 +344,14 @@ def annotate_fortran_file(sfile, file_index):
         + "Include [&] in capture clause to use variables by reference"
     )
 
-    for construct in scalar_functions:
+    for construct in function_calls:
         if construct.lower() in filtered_file_index.keys():
             prompt_lines.append(f"scribe-prompt: {construct} is an external function")
 
-    # for construct in scalar_functions:
-    #    if construct not in filtered_file_index.keys():
-    #        prompt_lines.append(f"scribe-prompt: {construct} is an array or statement function")
+    for construct in scalar_functions:
+        prompt_lines.append(
+            f"scribe-prompt: {construct} is an array or statement function"
+        )
 
     with open(sfile, "r") as source:
         source_code = source.readlines()
