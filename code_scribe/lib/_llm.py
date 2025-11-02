@@ -537,6 +537,9 @@ def prompt_generate(
 
     chat_template = system_template + toml.load(seed_prompt)["chat"]
 
+    if set(update_existing) & set(ref_existing):
+        raise ValueError("Reference and target files should be mutually exclusive")
+
     if update_existing:
         chat_template[-1]["content"] += (
             "Update the content of following files based on\n"
