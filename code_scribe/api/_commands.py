@@ -41,7 +41,9 @@ def inspect(filelist, query_prompt, model, save_prompts=False):
     )
 
 
-def generate(seed_prompt, model, save_prompts=False, update_existing=[]):
+def generate(
+    seed_prompt, model, save_prompts=False, update_existing=[], ref_existing=[]
+):
     """
     API command for creating a draft files
     """
@@ -50,4 +52,5 @@ def generate(seed_prompt, model, save_prompts=False, update_existing=[]):
         model=model,
         save_prompts=save_prompts,
         update_existing=update_existing,
+        ref_existing=ref_existing,
     )

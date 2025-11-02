@@ -106,9 +106,16 @@ def translate(fortran_files, seed_prompt, model, save_prompts):
     "-a",
     type=click.Path(exists=True),
     multiple=True,
-    help="List of file to update",
+    help="List of files to update",
 )
-def generate(seed_prompt, model, save_prompts, update_existing):
+@click.option(
+    "--ref-existing",
+    "-r",
+    type=click.Path(exists=True),
+    multiple=True,
+    help="List of reference files",
+)
+def generate(seed_prompt, model, save_prompts, update_existing, ref_existing):
     """
     \b
     Perform a generative AI generation of code in a file
@@ -123,7 +130,7 @@ def generate(seed_prompt, model, save_prompts, update_existing):
         raise click.UsageError(
             "Please provide either the '--model/-m' or '--save-prompts/-p' option"
         )
-    api.generate(seed_prompt, model, save_prompts, update_existing)
+    api.generate(seed_prompt, model, save_prompts, update_existing, ref_existing)
 
 
 @code_scribe.command(name="inspect")

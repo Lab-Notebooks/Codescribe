@@ -447,13 +447,14 @@ def prompt_inspect(
     if save_prompts:
         print("Saving prompts to scribe.json")
 
-    chat_template = [{"role": "user", "content": ""}]
+    chat_template = [{"role": "system", "content": ""}]
 
     chat_template[-1]["content"] += (
-        "I will give you source code from a set of files that\n"
-        + "belong to a scientific computing codebase. I want you\n"
-        + "to understand the source code and answer a query that\n"
-        + "follows. Source code for each will be separated using\n"
+        "You are a coding assistant.\n"
+        + "The user will give you source code from a set of files that\n"
+        + "belong to a scientific computing codebase. Understand the\n"
+        + "source code and answer a query that follows.\n"
+        + "Source code for each file will be separated using\n"
         + "elements <filename> ... </filename>. Additional\n"
         + "information related to the project structure may also be\n"
         + "provided within <index> ... </index>. This information will\n"
@@ -464,6 +465,8 @@ def prompt_inspect(
         + "present, then you may ignore it. The query prompt will be provided at the end\n"
         + "using elements <query> ... </query>.\n\n"
     )
+
+    chat_template.append({"role": "user", "content": ""})
 
     filtered_file_index = {}
     for fsource in filelist:
@@ -499,7 +502,9 @@ def prompt_inspect(
         print(result)
 
 
-def prompt_generate(seed_prompt, model=None, save_prompts=False, update_existing=[]):
+def prompt_generate(
+    seed_prompt, model=None, save_prompts=False, update_existing=[], ref_existing=[]
+):
     """
     Perform code understanding
     """
@@ -535,8 +540,26 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False, update_existing
     if update_existing:
         chat_template[-1]["content"] += (
             "Update the content of following files based on\n"
-            + "the instructionis Enclose output of each file in their\n"
-            + "respective XML elements. Only updated files who content is provided.\n\n"
+            + "the instructions. Enclose output of each file in their\n"
+            + "respective XML elements. Only update the following files.\n\n"
+        )
+
+        for filename in update_existing:
+            with open(filename, "r") as sfile:
+                source_code = []
+
+                for line in sfile.readlines():
+                    source_code.append(line)
+
+            if source_code:
+                chat_template[-1]["content"] += (
+                    "\n" + f"<{filename}>\n" + "".join(source_code) + f"</{filename}>\n"
+                )
+
+    if ref_existing:
+        chat_template[-1]["content"] += (
+            "Use the content of following files as a reference to \n"
+            + "update the files above. Do not edit these files treat them as read-only\n\n"
         )
 
         for filename in update_existing:
