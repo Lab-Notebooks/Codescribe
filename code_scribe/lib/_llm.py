@@ -532,7 +532,7 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False, reference_exist
         + "\n"
         + "Do not add any explanations or commentary outside of these tags.\n"
         + "Note that some of these files may be requested to be treated as read-only.\n"
-        + "Do edit generate files that requested as ready only."
+        + "Do not edit or generate files that are requested as ready only."
     )
 
     chat_template = system_template + toml.load(seed_prompt)["chat"]
@@ -600,7 +600,7 @@ def prompt_update(filelist, seed_prompt, model=None, reference_existing=[]):
         + "\n"
         + "Do not add any explanations or commentary outside of these tags.\n"
         + "Note that some of these files may be requested to be treated as read-only or may note be appended.\n"
-        + "Do edit files if they are not appended or requested as read-only."
+        + "Do not edit files if they are not appended or requested as read-only."
     )
 
     chat_template = system_template + toml.load(seed_prompt)["chat"]
