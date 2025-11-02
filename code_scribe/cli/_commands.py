@@ -102,20 +102,13 @@ def translate(fortran_files, seed_prompt, model, save_prompts):
     mutually_exclusive=["model"],
 )
 @click.option(
-    "--update-existing",
-    "-a",
-    type=click.Path(exists=True),
-    multiple=True,
-    help="List of files to update",
-)
-@click.option(
-    "--ref-existing",
+    "--reference-existing",
     "-r",
     type=click.Path(exists=True),
     multiple=True,
     help="List of reference files",
 )
-def generate(seed_prompt, model, save_prompts, update_existing, ref_existing):
+def generate(seed_prompt, model, save_prompts, reference_existing):
     """
     \b
     Perform a generative AI generation of code in a file
@@ -130,7 +123,42 @@ def generate(seed_prompt, model, save_prompts, update_existing, ref_existing):
         raise click.UsageError(
             "Please provide either the '--model/-m' or '--save-prompts/-p' option"
         )
-    api.generate(seed_prompt, model, save_prompts, update_existing, ref_existing)
+    api.generate(seed_prompt, model, save_prompts, reference_existing)
+
+
+@code_scribe.command(name="update")
+@click.argument("filelist", nargs=-1, required=True, type=click.Path(exists=True))
+@click.option(
+    "--seed-prompt",
+    "-p",
+    required=True,
+    help="TOML seed file containt prompts",
+)
+@click.option(
+    "--model",
+    "-m",
+    required=True,
+    help="Gen AI model name or path",
+)
+@click.option(
+    "--reference-existing",
+    "-r",
+    type=click.Path(exists=True),
+    multiple=True,
+    help="List of reference files",
+)
+def update(filelist, seed_prompt, model, reference_existing):
+    """
+    \b
+    Perform a generative AI generation of code in a file
+    \b
+
+    \b
+    This command applies generative AI to generate code
+    based on specifications given in the prompt/
+    \b
+    """
+    api.update(filelist, seed_prompt, model, reference_existing)
 
 
 @code_scribe.command(name="inspect")

@@ -502,9 +502,7 @@ def prompt_inspect(
         print(result)
 
 
-def prompt_generate(
-    seed_prompt, model=None, save_prompts=False, update_existing=[], ref_existing=[]
-):
+def prompt_generate(seed_prompt, model=None, save_prompts=False, reference_existing=[]):
     """
     Perform code understanding
     """
@@ -533,39 +531,19 @@ def prompt_generate(
         + "</filename2>\n"
         + "\n"
         + "Do not add any explanations or commentary outside of these tags.\n"
+        + "Note that some of these files may be requested to be treated as read-only.\n"
+        + "Do edit generate files that requested as ready only."
     )
 
     chat_template = system_template + toml.load(seed_prompt)["chat"]
 
-    if set(update_existing) & set(ref_existing):
-        raise ValueError("Reference and target files should be mutually exclusive")
-
-    if update_existing:
-        chat_template[-1]["content"] += (
-            "Update the content of following files based on\n"
-            + "the instructions. Enclose output of each file in their\n"
-            + "respective XML elements. Only update the following files.\n\n"
-        )
-
-        for filename in update_existing:
-            with open(filename, "r") as sfile:
-                source_code = []
-
-                for line in sfile.readlines():
-                    source_code.append(line)
-
-            if source_code:
-                chat_template[-1]["content"] += (
-                    "\n" + f"<{filename}>\n" + "".join(source_code) + f"</{filename}>\n"
-                )
-
-    if ref_existing:
+    if reference_existing:
         chat_template[-1]["content"] += (
             "Use the content of following files as a reference to \n"
-            + "update the files above. Do not edit these files treat them as read-only\n\n"
+            + "update the files above. Do not edit the files below, treat them as read-only\n\n"
         )
 
-        for filename in update_existing:
+        for filename in reference_existing:
             with open(filename, "r") as sfile:
                 source_code = []
 
@@ -580,6 +558,92 @@ def prompt_generate(
     if save_prompts:
         with open("scribe.json", "w") as pdest:
             json.dump(chat_template, pdest, indent=4)
+
+    if neural_model:
+        result = neural_model.chat(chat_template)
+
+        pattern = re.compile(r"<([^>]+)>\s*(.*?)\s*</\1>", re.DOTALL)
+
+        for match in pattern.finditer(result):
+            filename, content = match.groups()
+            # Ensure directory exists if filename has subpaths
+            os.makedirs(os.path.dirname(filename) or ".", exist_ok=True)
+            # Write to file
+            with open(filename, "w") as f:
+                f.write(content.strip() + "\n")
+            print(f"Wrote {filename}")
+
+
+def prompt_update(filelist, seed_prompt, model=None, reference_existing=[]):
+    """
+    Perform code understanding
+    """
+    neural_model = None
+
+    print("Performing neural update")
+    neural_model = _set_neural_model(model)
+
+    system_template = [{"role": "system", "content": ""}]
+    system_template[-1]["content"] += (
+        "You are a code generation and editing assistant.\n"
+        + "When the user asks for code that spans multiple files,\n"
+        + "output each file enclosed within\n"
+        + "XML-style tags using the format:\n"
+        + "\n"
+        + "<filename1>\n"
+        + "... file contents ...\n"
+        + "</filename1>\n"
+        + "\n"
+        + "<filename2>\n"
+        + "... file contents ...\n"
+        + "</filename2>\n"
+        + "\n"
+        + "Do not add any explanations or commentary outside of these tags.\n"
+        + "Note that some of these files may be requested to be treated as read-only or may note be appended.\n"
+        + "Do edit files if they are not appended or requested as read-only."
+    )
+
+    chat_template = system_template + toml.load(seed_prompt)["chat"]
+
+    if set(filelist) & set(reference_existing):
+        raise ValueError("Reference and target files should be mutually exclusive")
+
+    if filelist:
+        chat_template[-1]["content"] += (
+            "Update the content of following files based on\n"
+            + "the instructions. Enclose output of each file in their\n"
+            + "respective XML elements. Only update the following files.\n\n"
+        )
+
+        for filename in filelist:
+            with open(filename, "r") as sfile:
+                source_code = []
+
+                for line in sfile.readlines():
+                    source_code.append(line)
+
+            if source_code:
+                chat_template[-1]["content"] += (
+                    "\n" + f"<{filename}>\n" + "".join(source_code) + f"</{filename}>\n"
+                )
+
+    if reference_existing:
+        chat_template[-1]["content"] += (
+            "Use the content of following files as a reference to \n"
+            + "update the files above. Do not edit the files below, treat them as read-only\n\n"
+        )
+
+        for filename in reference_existing:
+            with open(filename, "r") as sfile:
+                source_code = []
+
+                for line in sfile.readlines():
+                    source_code.append(line)
+
+            if source_code:
+                chat_template[-1]["content"] += (
+                    "\n" + f"<{filename}>\n" + "".join(source_code) + f"</{filename}>\n"
+                )
 
     if neural_model:
         result = neural_model.chat(chat_template)
