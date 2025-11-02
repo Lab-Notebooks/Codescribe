@@ -599,7 +599,7 @@ def prompt_update(filelist, seed_prompt, model=None, reference_existing=[]):
         + "</filename2>\n"
         + "\n"
         + "Do not add any explanations or commentary outside of these tags.\n"
-        + "Note that some of these files may be requested to be treated as read-only or may note be appended.\n"
+        + "Note that some of these files may be requested to be treated as read-only or may not be appended.\n"
         + "Do not edit files if they are not appended or requested as read-only."
     )
 
