@@ -10,24 +10,109 @@ from code_scribe import lib
 
 def load_chat_template(filepath):
     """
-    Load a chat prompt file.
+    Load and validate a chat prompt file.
 
-    - If the file ends with `.toml`, it expects a TOML file with a 'chat' key.
-      Example: toml.load(seed_prompt)["chat"]
-    - If the file ends with `.prompt`, it expects the [user]/[assistant] custom format.
+    Supports:
+      1. [[chat]]
+         role = "user" / "assistant"
+         content = "..."
+
+      2. [[chat.user]] / [[chat.assistant]]
+         content = "..."
+
+    Validation rules:
+      - Conversation must start with a 'user' message
+      - Roles must alternate strictly: user → assistant → user → assistant ...
+      - Conversation may end with a 'user'
+      - No two consecutive roles may be identical
+
+    Raises:
+        KeyError: if structure or content missing
+        ValueError: if invalid role or conversation pattern detected
     """
     path = pathlib.Path(filepath)
-
-    if path.suffix == ".toml":
-        data = toml.load(path)
-        if "chat" not in data:
-            raise KeyError(f"'chat' key not found in TOML file: {filepath}")
-        chat_template = data["chat"]
-
-    else:
+    if path.suffix != ".toml":
         raise ValueError(
             f"Unsupported file extension '{path.suffix}'. Expected '.toml'."
         )
+
+    raw_text = path.read_text()
+    data = toml.loads(raw_text)
+
+    if "chat" not in data:
+        raise KeyError(f"'chat' key not found in TOML file: {filepath}")
+
+    chat_section = data["chat"]
+    chat_template = []
+    valid_roles = {"user", "assistant"}
+
+    # --- Case 1: [[chat]] array of tables ---
+    if isinstance(chat_section, list):
+        for entry in chat_section:
+            if (
+                not isinstance(entry, dict)
+                or "role" not in entry
+                or "content" not in entry
+            ):
+                raise KeyError(f"Invalid [[chat]] entry in {filepath}")
+            role = entry["role"]
+            if role not in valid_roles:
+                raise ValueError(f"Invalid role '{role}' in {filepath}")
+            chat_template.append({"role": role, "content": entry["content"]})
+
+    # --- Case 2: [[chat.user]] / [[chat.assistant]] arrays of tables ---
+    elif isinstance(chat_section, dict):
+        # Extract the declared order of appearance from the raw TOML text
+        pattern = re.compile(r"\[\[chat\.(user|assistant)\]\]")
+        declared_roles = [m.group(1) for m in pattern.finditer(raw_text)]
+
+        # Keep counters to pull from correct list positions
+        counters = {role: 0 for role in valid_roles}
+
+        # Flatten entries following the declared order
+        for role in declared_roles:
+            if role not in chat_section:
+                raise KeyError(
+                    f"[[chat.{role}]] section declared but not found in {filepath}"
+                )
+            entries = chat_section[role]
+            idx = counters[role]
+            if idx >= len(entries):
+                raise IndexError(
+                    f"More [[chat.{role}]] headers than parsed entries for {role} in {filepath}"
+                )
+            entry = entries[idx]
+            if "content" not in entry:
+                raise KeyError(f"[[chat.{role}]] entry missing 'content' in {filepath}")
+            chat_template.append({"role": role, "content": entry["content"]})
+            counters[role] += 1
+
+    else:
+        raise TypeError(f"Unexpected 'chat' structure in {filepath}")
+
+    # --- Conversation alternation validation ---
+    if not chat_template:
+        raise ValueError("Chat template is empty.")
+
+    roles = [entry["role"] for entry in chat_template]
+
+    # must start with user
+    if roles[0] != "user":
+        raise ValueError("Conversation must start with a 'user' message.")
+
+    # must not end with assistant
+    if roles[-1] == "assistant":
+        raise ValueError(
+            "Conversation must end with a 'user' message (not 'assistant')."
+        )
+
+    # must alternate strictly
+    for i in range(1, len(roles)):
+        if roles[i] == roles[i - 1]:
+            raise ValueError(
+                f"Invalid role order at positions {i} and {i+1}: "
+                f"two consecutive '{roles[i]}' entries found."
+            )
 
     return chat_template
 
