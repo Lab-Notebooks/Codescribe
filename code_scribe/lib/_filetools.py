@@ -1,8 +1,35 @@
 import re
 import os
+import pathlib
+import toml
 import yaml
 
+
 from code_scribe import lib
+
+
+def load_chat_template(filepath):
+    """
+    Load a chat prompt file.
+
+    - If the file ends with `.toml`, it expects a TOML file with a 'chat' key.
+      Example: toml.load(seed_prompt)["chat"]
+    - If the file ends with `.prompt`, it expects the [user]/[assistant] custom format.
+    """
+    path = pathlib.Path(filepath)
+
+    if path.suffix == ".toml":
+        data = toml.load(path)
+        if "chat" not in data:
+            raise KeyError(f"'chat' key not found in TOML file: {filepath}")
+        chat_template = data["chat"]
+
+    else:
+        raise ValueError(
+            f"Unsupported file extension '{path.suffix}'. Expected '.toml'."
+        )
+
+    return chat_template
 
 
 def extract_fortran_info(filepath):

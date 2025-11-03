@@ -2,7 +2,7 @@
 
 # Import libraries
 import re
-import os, sys, toml, importlib, json, requests
+import os, sys, importlib, json, requests
 
 from typing import Optional, List, Dict
 from alive_progress import alive_bar
@@ -10,31 +10,31 @@ from alive_progress import alive_bar
 from code_scribe import lib
 
 
-class LlamaModel:
-    def __init__(self, model):
-
-        llama = importlib.import_module("llama")
-
-        self.pipeline = llama.Llama.build(
-            ckpt_dir=model,
-            tokenizer_path=os.path.join(model, "tokenizer.model"),
-            max_seq_len=4096,
-            max_batch_size=8,
-        )
-
-        self.max_gen_len = None
-        self.temperature = 0.5
-        self.top_p = 0.95
-
-    def chat(self, chat_template):
-        results = self.pipeline.chat_completion(
-            [chat_template],
-            max_gen_len=self.max_gen_len,
-            temperature=self.temperature,
-            top_p=self.top_p,
-        )
-        print(results)
-        return results[0]["generation"]["content"]
+# class LlamaModel:
+#    def __init__(self, model):
+#
+#        llama = importlib.import_module("llama")
+#
+#        self.pipeline = llama.Llama.build(
+#            ckpt_dir=model,
+#            tokenizer_path=os.path.join(model, "tokenizer.model"),
+#            max_seq_len=4096,
+#            max_batch_size=8,
+#        )
+#
+#        self.max_gen_len = None
+#        self.temperature = 0.5
+#        self.top_p = 0.95
+#
+#    def chat(self, chat_template):
+#        results = self.pipeline.chat_completion(
+#            [chat_template],
+#            max_gen_len=self.max_gen_len,
+#            temperature=self.temperature,
+#            top_p=self.top_p,
+#        )
+#        print(results)
+#        return results[0]["generation"]["content"]
 
 
 class OpenAIModel:
@@ -79,6 +79,12 @@ class ArgoModel:
 
     def chat(self, chat_template):
 
+        if chat_template[0]["role"] == "system":
+            system_prompt = chat_template[0]["content"]
+            chat_template.pop(0)
+        else:
+            system_prompt = "You are a large language model with the name Argo."
+
         # Combine all role/content pairs into a single text block
         prompt_text = "\n\n".join(
             f"{item['role'].capitalize()}: {item['content'].strip()}"
@@ -89,7 +95,7 @@ class ArgoModel:
         data = {
             "user": self.user,
             "model": self.model,
-            "system": "You are a large language model with the name Argo.",
+            "system": system_prompt,
             "prompt": [prompt_text],
             "stop": [],
             "temperature": 0.1,
@@ -103,15 +109,6 @@ class ArgoModel:
         )
 
         return response.json()["response"]
-
-
-class PerplexityModel:
-    def __init__(self):
-        perplexity = importlib.import_module("perplexity")
-        self.pipeline = perplexity.Perplexity()
-
-    def chat(self, chat_template):
-        pass
 
 
 class KimiModel:
@@ -288,6 +285,8 @@ class TFModel:
 
     def chat(self, chat_template):
 
+        chat_template = _merge_system_with_user(chat_template)
+
         results = self.pipeline(
             chat_template,
             max_new_tokens=self.max_new_tokens,
@@ -301,6 +300,24 @@ class TFModel:
         )
 
         return results[0]["generated_text"][-1]["content"]
+
+
+def _merge_system_with_user(chat_template):
+    """
+    Remove system role and prepend its contents to the first
+    user role
+    """
+    if chat_template and chat_template[0]["role"] == "system":
+        system_content = chat_template[0]["content"]
+        # Find the first user entry
+        for msg in chat_template:
+            if msg["role"] == "user":
+                msg["content"] = system_content + "\n\n" + msg["content"]
+                break
+        # Remove the system entry
+        chat_template = [msg for msg in chat_template if msg["role"] != "system"]
+
+    return chat_template
 
 
 def _set_neural_model(model):
@@ -341,7 +358,7 @@ def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
     if save_prompts:
         print("Saving custom prompts per file")
 
-    chat_template = toml.load(seed_prompt)["chat"]
+    chat_template = lib.load_chat_template(seed_prompt)
 
     with alive_bar(len(mapping[0]), bar="blocks") as bar:
 
@@ -535,7 +552,7 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False, reference_exist
         + "Do not edit or generate files that are requested as ready only."
     )
 
-    chat_template = system_template + toml.load(seed_prompt)["chat"]
+    chat_template = system_template + lib.load_chat_template(seed_prompt)
 
     if reference_existing:
         chat_template[-1]["content"] += (
@@ -603,7 +620,7 @@ def prompt_update(filelist, seed_prompt, model=None, reference_existing=[]):
         + "Do not edit files if they are not appended or requested as read-only."
     )
 
-    chat_template = system_template + toml.load(seed_prompt)["chat"]
+    chat_template = system_template + lib.load_chat_template(seed_prompt)
 
     if set(filelist) & set(reference_existing):
         raise ValueError("Reference and target files should be mutually exclusive")
