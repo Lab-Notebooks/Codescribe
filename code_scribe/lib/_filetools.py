@@ -118,35 +118,60 @@ def detect_chat_style(raw_text):
 
 def format_seed_prompt(filepath):
     """
-    Format TOML chat file in place using mdformat.
-    Preserves file structure (split/grouped).
+    Format TOML chat file in place using format_text_block().
+    - Preserves all comments, headers, and blank lines exactly.
+    - Uses chat_entries (from load_chat_template) as the source of truth.
+    - Replaces each content block sequentially in the raw file.
     """
+
     path = pathlib.Path(filepath)
     raw_text = path.read_text()
     chat_entries = load_chat_template(filepath)
     style = detect_chat_style(raw_text)
 
-    formatted_blocks = []
-    for entry in chat_entries:
-        role = entry["role"]
-        content = entry["content"]
+    # Match any TOML content block: content = ''' ... ''' OR content = """ ... """
+    pattern = re.compile(
+        r"content\s*=\s*(?P<quote>'''|\"\"\")([\s\S]*?)(?P=quote)", re.MULTILINE
+    )
 
-        formatted_content = format_content_block(content)
+    parts = []
+    last_end = 0
+    entry_idx = 0
 
-        if style == "split":
-            block = f"[[chat.{role}]]\ncontent = '''\n{formatted_content}\n'''\n"
+    for match in pattern.finditer(raw_text):
+        start, end = match.span()
+        quote = match.group("quote")
+        content_inside = match.group(2)
+
+        # Keep comments or non-chat lines before this unchanged
+        parts.append(raw_text[last_end:start])
+
+        if entry_idx < len(chat_entries):
+            entry = chat_entries[entry_idx]
+            formatted = format_text_block(entry["content"])
+            new_block = f"content = '''\n{formatted}\n'''"
+            parts.append(new_block)
+            entry_idx += 1
         else:
-            block = (
-                f"[[chat]]\nrole = '{role}'\ncontent = '''\n{formatted_content}\n'''\n"
-            )
+            # Fallback: leave unrecognized content untouched
+            parts.append(match.group(0))
 
-        formatted_blocks.append(block)
+        last_end = end
 
-    formatted_text = "\n".join(formatted_blocks).replace("\n\n\n", "\n\n")
+    # Preserve everything after last content block
+    parts.append(raw_text[last_end:])
+    formatted_text = "".join(parts)
+
+    # Normalize spacing (optional cleanup)
+    formatted_text = re.sub(r"\n{3,}", "\n\n", formatted_text)
+
+    # Ensure no accidental regex backreferences
+    formatted_text = formatted_text.replace("\\1", "").replace("\\3", "")
+
     path.write_text(formatted_text)
 
 
-def format_content_block(text, width=100, indent_step=3):
+def format_text_block(text, width=100, indent_step=3):
     """
     Cleanly format a text block (like Markdown or TOML content).
 
@@ -156,7 +181,7 @@ def format_content_block(text, width=100, indent_step=3):
     - Collapses extra blank lines.
 
     Example:
-        formatted = format_content_block(raw_text, width=100, indent_step=2)
+        formatted = format_text_block(raw_text, width=100, indent_step=2)
     """
     lines = text.splitlines()
     out_lines = []
