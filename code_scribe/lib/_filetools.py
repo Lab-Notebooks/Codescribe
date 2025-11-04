@@ -144,10 +144,9 @@ def format_seed_prompt(filepath):
 
     formatted_text = "\n".join(formatted_blocks).replace("\n\n\n", "\n\n")
     path.write_text(formatted_text)
-    print(f"Reformatted {filepath}")
 
 
-def format_content_block(text, width=100, indent_step=2):
+def format_content_block(text, width=100, indent_step=3):
     """
     Cleanly format a text block (like Markdown or TOML content).
 
@@ -165,24 +164,20 @@ def format_content_block(text, width=100, indent_step=2):
 
     for line in lines:
         stripped = line.rstrip()
-        if stripped.startswith("```"):  # toggle code block
-            in_code_block = not in_code_block
-            out_lines.append(stripped)
-            continue
-
-        if in_code_block or not stripped:
-            # Leave code and blank lines untouched (just strip trailing ws)
-            out_lines.append(stripped)
-            continue
 
         stripped = stripped.replace("\t", " " * 8)
+        indent = len(stripped) - len(stripped.lstrip())
+
+        if indent > 0:
+            indent = max(indent + 1, 3) // indent_step * indent_step
+        indent_str = " " * indent
 
         # reflow line if too long
         if len(stripped) > width:
-            wrapped_lines = wrap(stripped, width=width)
-            out_lines.extend(w for w in wrapped_lines)
+            wrapped_lines = wrap(stripped.lstrip(), width=width - indent)
+            out_lines.extend(indent_str + w for w in wrapped_lines)
         else:
-            out_lines.append(stripped)
+            out_lines.append(indent_str + stripped.lstrip())
 
     # collapse multiple blank lines
     formatted = []
