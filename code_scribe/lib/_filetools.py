@@ -15,20 +15,17 @@ def load_chat_template(filepath):
     Supports:
       1. [[chat]]
          role = "user" / "assistant"
-         content = "..."
+         content = '...'
 
       2. [[chat.user]] / [[chat.assistant]]
-         content = "..."
+         content = '...'
 
     Validation rules:
       - Conversation must start with a 'user' message
-      - Roles must alternate strictly: user → assistant → user → assistant ...
-      - Conversation may end with a 'user'
+      - Roles must alternate strictly: user-assistant-user-assistant ...
+      - Conversation must end with a 'user'
       - No two consecutive roles may be identical
-
-    Raises:
-        KeyError: if structure or content missing
-        ValueError: if invalid role or conversation pattern detected
+      - Multi-line content **must** use triple single quotes (''' ... ''')
     """
     path = pathlib.Path(filepath)
     if path.suffix != ".toml":
@@ -38,6 +35,15 @@ def load_chat_template(filepath):
 
     raw_text = path.read_text()
     data = toml.loads(raw_text)
+
+    # --- Enforce triple single quotes for multi-line content ---
+    bad_quotes = re.findall(r'content\s*=\s*"""', raw_text)
+    if bad_quotes:
+        raise ValueError(
+            f"Invalid TOML quoting in {filepath}: "
+            f"Use triple single quotes ('''...''') for multi-line content blocks "
+            f'instead of triple double quotes ("""...""").'
+        )
 
     if "chat" not in data:
         raise KeyError(f"'chat' key not found in TOML file: {filepath}")
@@ -62,14 +68,10 @@ def load_chat_template(filepath):
 
     # --- Case 2: [[chat.user]] / [[chat.assistant]] arrays of tables ---
     elif isinstance(chat_section, dict):
-        # Extract the declared order of appearance from the raw TOML text
         pattern = re.compile(r"\[\[chat\.(user|assistant)\]\]")
         declared_roles = [m.group(1) for m in pattern.finditer(raw_text)]
-
-        # Keep counters to pull from correct list positions
         counters = {role: 0 for role in valid_roles}
 
-        # Flatten entries following the declared order
         for role in declared_roles:
             if role not in chat_section:
                 raise KeyError(
@@ -86,7 +88,6 @@ def load_chat_template(filepath):
                 raise KeyError(f"[[chat.{role}]] entry missing 'content' in {filepath}")
             chat_template.append({"role": role, "content": entry["content"]})
             counters[role] += 1
-
     else:
         raise TypeError(f"Unexpected 'chat' structure in {filepath}")
 
@@ -95,25 +96,16 @@ def load_chat_template(filepath):
         raise ValueError("Chat template is empty.")
 
     roles = [entry["role"] for entry in chat_template]
-
-    # must start with user
     if roles[0] != "user":
         raise ValueError("Conversation must start with a 'user' message.")
-
-    # must not end with assistant
     if roles[-1] == "assistant":
-        raise ValueError(
-            "Conversation must end with a 'user' message (not 'assistant')."
-        )
-
-    # must alternate strictly
+        raise ValueError("Conversation must end with a 'user' message.")
     for i in range(1, len(roles)):
         if roles[i] == roles[i - 1]:
             raise ValueError(
                 f"Invalid role order at positions {i} and {i+1}: "
                 f"two consecutive '{roles[i]}' entries found."
             )
-
     return chat_template
 
 
@@ -124,28 +116,30 @@ def detect_chat_style(raw_text):
     )
 
 
-def format_chat_template_with_mdformat(filepath):
+def format_seed_prompt(filepath):
     """
     Format TOML chat file in place using mdformat.
     Preserves file structure (split/grouped).
     """
     path = pathlib.Path(filepath)
     raw_text = path.read_text()
-    data = toml.loads(raw_text)
     chat_entries = load_chat_template(filepath)
     style = detect_chat_style(raw_text)
 
     formatted_blocks = []
     for entry in chat_entries:
         role = entry["role"]
-        content = entry["content"].rstrip("\n")
+        content = entry["content"]
 
-        formatted_md = format_content_block(content)
+        formatted_content = format_content_block(content)
 
         if style == "split":
-            block = f'[[chat.{role}]]\ncontent = """\n{formatted_md}\n"""\n'
+            block = f"[[chat.{role}]]\ncontent = '''\n{formatted_content}\n'''\n"
         else:
-            block = f'[[chat]]\nrole = "{role}"\ncontent = """\n{formatted_md}\n"""\n'
+            block = (
+                f"[[chat]]\nrole = '{role}'\ncontent = '''\n{formatted_content}\n'''\n"
+            )
+
         formatted_blocks.append(block)
 
     formatted_text = "\n".join(formatted_blocks).replace("\n\n\n", "\n\n")
@@ -153,7 +147,7 @@ def format_chat_template_with_mdformat(filepath):
     print(f"Reformatted {filepath}")
 
 
-def format_content_block(text: str, width: int = 100, indent_step: int = 2) -> str:
+def format_content_block(text, width=100, indent_step=2):
     """
     Cleanly format a text block (like Markdown or TOML content).
 
@@ -181,17 +175,14 @@ def format_content_block(text: str, width: int = 100, indent_step: int = 2) -> s
             out_lines.append(stripped)
             continue
 
-        # normalize indentation to nearest multiple of indent_step
-        leading_spaces = len(line) - len(line.lstrip(" "))
-        norm_indent = (leading_spaces // indent_step) * indent_step
-        indent_str = " " * norm_indent
+        stripped = stripped.replace("\t", " " * 8)
 
         # reflow line if too long
         if len(stripped) > width:
-            wrapped_lines = wrap(stripped, width=width - norm_indent)
-            out_lines.extend(indent_str + w for w in wrapped_lines)
+            wrapped_lines = wrap(stripped, width=width)
+            out_lines.extend(w for w in wrapped_lines)
         else:
-            out_lines.append(indent_str + stripped)
+            out_lines.append(stripped)
 
     # collapse multiple blank lines
     formatted = []

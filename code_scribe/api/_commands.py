@@ -70,4 +70,4 @@ def format(seed_prompt_list):
     Format toml files
     """
     for seed_prompt in seed_prompt_list:
-        lib.format_chat_template_with_mdformat(seed_prompt)
+        lib.format_seed_prompt(seed_prompt)
