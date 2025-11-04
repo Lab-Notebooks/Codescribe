@@ -3,7 +3,7 @@ import os
 import pathlib
 import toml
 import yaml
-
+from textwrap import wrap
 
 from code_scribe import lib
 
@@ -115,6 +115,97 @@ def load_chat_template(filepath):
             )
 
     return chat_template
+
+
+def detect_chat_style(raw_text):
+    """Return 'split' if [[chat.user]] found, else 'grouped'."""
+    return (
+        "split" if re.search(r"\[\[chat\.(user|assistant)\]\]", raw_text) else "grouped"
+    )
+
+
+def format_chat_template_with_mdformat(filepath):
+    """
+    Format TOML chat file in place using mdformat.
+    Preserves file structure (split/grouped).
+    """
+    path = pathlib.Path(filepath)
+    raw_text = path.read_text()
+    data = toml.loads(raw_text)
+    chat_entries = load_chat_template(filepath)
+    style = detect_chat_style(raw_text)
+
+    formatted_blocks = []
+    for entry in chat_entries:
+        role = entry["role"]
+        content = entry["content"].rstrip("\n")
+
+        formatted_md = format_content_block(content)
+
+        if style == "split":
+            block = f'[[chat.{role}]]\ncontent = """\n{formatted_md}\n"""\n'
+        else:
+            block = f'[[chat]]\nrole = "{role}"\ncontent = """\n{formatted_md}\n"""\n'
+        formatted_blocks.append(block)
+
+    formatted_text = "\n".join(formatted_blocks).replace("\n\n\n", "\n\n")
+    path.write_text(formatted_text)
+    print(f"Reformatted {filepath}")
+
+
+def format_content_block(text: str, width: int = 100, indent_step: int = 2) -> str:
+    """
+    Cleanly format a text block (like Markdown or TOML content).
+
+    - Wraps lines to 'width' without breaking code fences.
+    - Removes trailing whitespace.
+    - Normalizes indentation levels to multiples of indent_step.
+    - Collapses extra blank lines.
+
+    Example:
+        formatted = format_content_block(raw_text, width=100, indent_step=2)
+    """
+    lines = text.splitlines()
+    out_lines = []
+    in_code_block = False
+
+    for line in lines:
+        stripped = line.rstrip()
+        if stripped.startswith("```"):  # toggle code block
+            in_code_block = not in_code_block
+            out_lines.append(stripped)
+            continue
+
+        if in_code_block or not stripped:
+            # Leave code and blank lines untouched (just strip trailing ws)
+            out_lines.append(stripped)
+            continue
+
+        # normalize indentation to nearest multiple of indent_step
+        leading_spaces = len(line) - len(line.lstrip(" "))
+        norm_indent = (leading_spaces // indent_step) * indent_step
+        indent_str = " " * norm_indent
+
+        # reflow line if too long
+        if len(stripped) > width:
+            wrapped_lines = wrap(stripped, width=width - norm_indent)
+            out_lines.extend(indent_str + w for w in wrapped_lines)
+        else:
+            out_lines.append(indent_str + stripped)
+
+    # collapse multiple blank lines
+    formatted = []
+    last_blank = False
+    for l in out_lines:
+        if not l.strip():
+            if not last_blank:
+                formatted.append("")
+            last_blank = True
+        else:
+            formatted.append(l)
+            last_blank = False
+
+    return "\n".join(formatted).rstrip() + "\n"
 
 
 def extract_fortran_info(filepath):

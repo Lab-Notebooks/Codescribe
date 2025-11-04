@@ -1,5 +1,6 @@
 click
 toml
 pyyaml
+pypandoc
 alive-progress==3.1.4
 openai

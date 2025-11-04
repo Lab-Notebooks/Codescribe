@@ -63,3 +63,11 @@ def update(filelist, seed_prompt, model, reference_existing=[]):
         model=model,
         reference_existing=reference_existing,
     )
+
+
+def format(seed_prompt_list):
+    """
+    Format toml files
+    """
+    for seed_prompt in seed_prompt_list:
+        lib.format_chat_template_with_mdformat(seed_prompt)

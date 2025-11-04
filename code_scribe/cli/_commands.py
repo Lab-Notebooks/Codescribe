@@ -197,3 +197,22 @@ def inspect(fortran_files, query_prompt, model, save_prompts):
         )
 
     api.inspect(fortran_files, query_prompt, model, save_prompts)
+
+
+@code_scribe.command(name="format")
+@click.argument(
+    "seed-prompt-list", nargs=-1, required=True, type=click.Path(exists=True)
+)
+def format(seed_prompt_list):
+    """
+    \b
+    Format seed prompt files (chat templates)
+    \b
+
+    \b
+    This command loads the TOML prompt files
+    and formats its contents into a markdown
+    format
+    \b
+    """
+    api.format(seed_prompt_list)
