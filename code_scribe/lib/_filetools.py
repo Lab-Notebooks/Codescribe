@@ -193,6 +193,9 @@ def format_text_block(text, width=100, indent_step=3):
         stripped = stripped.replace("\t", " " * 8)
         indent = len(stripped) - len(stripped.lstrip())
 
+        if stripped.startswith("-"):
+            stripped = "-" + " " * 2 + stripped.split("-",1)[1].lstrip()
+
         if indent > 0:
             indent = max(indent + 1, 3) // indent_step * indent_step
         indent_str = " " * indent
