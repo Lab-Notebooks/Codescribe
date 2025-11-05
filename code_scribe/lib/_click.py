@@ -1,4 +1,4 @@
-from click import command, option, Option, UsageError
+from click import command, option, Option, UsageError, Context
 from typing import Any, Dict, List, Set
 
 
@@ -15,7 +15,7 @@ class MutuallyExclusiveOption(Option):
         super(MutuallyExclusiveOption, self).__init__(*args, **kwargs)
 
     def handle_parse_result(
-        self, ctx: Any, opts: Dict[str, Any], args: List[str]
+        self, ctx: Context, opts: Dict[str, Any], args: List[str]
     ) -> Any:
         if self.mutually_exclusive.intersection(opts) and self.name in opts:
             raise UsageError(
