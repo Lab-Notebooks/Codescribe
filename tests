@@ -31,3 +31,5 @@ code-scribe update src/main.cpp src/Solver.F90 src/Initialize.F90 \
 
 cat src/main.cpp src/Solver.F90 src/Initialize.F90
 git checkout src/main.cpp src/Solver.F90 src/Initialize.F90
+
+code-scribe format prompts/*.toml
