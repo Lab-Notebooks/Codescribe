@@ -11,7 +11,7 @@ import click
 @click.group(name="code-scribe", invoke_without_command=True)
 @click.pass_context
 @click.option("--version", "-v", is_flag=True)
-def code_scribe(ctx, version):
+def code_scribe(ctx: click.Context, version: bool) -> None:
     """
     \b
     Software development tool for converting code from Fortran to C++
