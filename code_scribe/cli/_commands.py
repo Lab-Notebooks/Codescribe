@@ -85,9 +85,12 @@ def translate(
     \b
     """
     if (not model) and (not save_prompts):
-        raise click.UsageError(
-            "Please provide either the '--model/-m' or '--save-prompts/-p' option"
-        )
+        model = os.getenv("CODESCRIBE_MODEL")
+        if not model:
+            raise click.UsageError(
+                "Please provide either the '--model/-m' or '--save-prompts/-p' option"
+            )
+
     api.translate(
         [Path(file) for file in fortran_files],
         Path(seed_prompt),
@@ -137,9 +140,12 @@ def generate(
     \b
     """
     if (not model) and (not save_prompts):
-        raise click.UsageError(
-            "Please provide either the '--model/-m' or '--save-prompts/-p' option"
-        )
+        model = os.getenv("CODESCRIBE_MODEL")
+        if not model:
+            raise click.UsageError(
+                "Please provide either the '--model/-m' or '--save-prompts/-p' option"
+            )
+
     api.generate(
         seed_prompt,
         model,
@@ -160,6 +166,7 @@ def generate(
     "--model",
     "-m",
     required=True,
+    default=os.getenv("CODESCRIBE_MODEL"),
     help="Gen AI model name or path",
 )
 @click.option(
@@ -229,9 +236,11 @@ def inspect(
     \b
     """
     if (not model) and (not save_prompts):
-        raise click.UsageError(
-            "Please provide either the '--model/-m' or '--save-prompts/-p' option"
-        )
+        model = os.getenv("CODESCRIBE_MODEL")
+        if not model:
+            raise click.UsageError(
+                "Please provide either the '--model/-m' or '--save-prompts/-p' option"
+            )
 
     api.inspect(
         [Path(file) for file in fortran_files],
