@@ -18,7 +18,7 @@ def code_scribe(ctx: click.Context, version: bool) -> None:
     """
     if ctx.invoked_subcommand is None and not version:
         subprocess.run(
-            "export PATH=~/.local/bin:/usr/local/bin:$PATH && code-scribe --help",
+            "code-scribe --help",
             shell=True,
             check=True,
         )
