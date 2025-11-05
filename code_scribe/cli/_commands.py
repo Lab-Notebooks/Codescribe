@@ -111,7 +111,7 @@ def translate(fortran_files, seed_prompt, model, save_prompts):
 def generate(seed_prompt, model, save_prompts, reference_existing):
     """
     \b
-    Perform a generative AI generation of code in a file
+    Perform AI based code generation
     \b
 
     \b
@@ -206,7 +206,7 @@ def inspect(fortran_files, query_prompt, model, save_prompts):
 def format(seed_prompt_list):
     """
     \b
-    Format seed prompt files (chat templates)
+    Format TOML seed prompt files
     \b
 
     \b

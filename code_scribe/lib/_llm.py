@@ -10,33 +10,6 @@ from alive_progress import alive_bar
 from code_scribe import lib
 
 
-# class LlamaModel:
-#    def __init__(self, model):
-#
-#        llama = importlib.import_module("llama")
-#
-#        self.pipeline = llama.Llama.build(
-#            ckpt_dir=model,
-#            tokenizer_path=os.path.join(model, "tokenizer.model"),
-#            max_seq_len=4096,
-#            max_batch_size=8,
-#        )
-#
-#        self.max_gen_len = None
-#        self.temperature = 0.5
-#        self.top_p = 0.95
-#
-#    def chat(self, chat_template):
-#        results = self.pipeline.chat_completion(
-#            [chat_template],
-#            max_gen_len=self.max_gen_len,
-#            temperature=self.temperature,
-#            top_p=self.top_p,
-#        )
-#        print(results)
-#        return results[0]["generation"]["content"]
-
-
 class OpenAIModel:
     def __init__(self):
         openai = importlib.import_module("openai")
@@ -122,13 +95,7 @@ class KimiModel:
       moonshotai/Kimi-K2-Instruct
     """
 
-    def __init__(
-        self,
-        model: str = "moonshotai/Kimi-K2-Instruct",
-        outputs: int = 1,
-        max_tokens: int = 4096,
-        timeout: int = 120,
-    ):
+    def __init__(self):
         self.api_key = os.getenv("KIMI_API_KEY")
         if not self.api_key:
             raise ValueError("KIMI_API_KEY env var is not set")
@@ -137,10 +104,10 @@ class KimiModel:
         if not self.endpoint:
             raise ValueError("KIMI_API_ENDPOINT env var is not set")
 
-        self.model = model
-        self.outputs = outputs
-        self.max_tokens = max_tokens
-        self.timeout = timeout
+        self.model = "moonshotai/Kimi-K2-Instruct"
+        self.outputs = 1
+        self.max_tokens = 4096
+        self.timeout = 120
 
         self._session = requests.Session()
         self._headers = {
@@ -200,13 +167,7 @@ class QwenModel:
       moonshotai/Kimi-K2-Instruct
     """
 
-    def __init__(
-        self,
-        model: str = "qwen3-coder:30b",
-        outputs: int = 1,
-        max_tokens: int = 4096,
-        timeout: int = 120,
-    ):
+    def __init__(self):
         self.api_key = os.getenv("KIMI_API_KEY")
         if not self.api_key:
             raise ValueError("KIMI_API_KEY env var is not set")
@@ -215,10 +176,10 @@ class QwenModel:
         if not self.endpoint:
             raise ValueError("KIMI_API_ENDPOINT env var is not set")
 
-        self.model = model
-        self.outputs = outputs
-        self.max_tokens = max_tokens
-        self.timeout = timeout
+        self.model = "qwen3-coder:30b"
+        self.outputs = 1
+        self.max_tokens = 4096
+        self.timeout = 120
 
         self._session = requests.Session()
         self._headers = {
@@ -552,7 +513,12 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False, reference_exist
         + "Do not edit or generate files that are requested as ready only."
     )
 
-    chat_template = system_template + lib.load_chat_template(seed_prompt)
+    if os.path.exists(seed_prompt):
+        chat_template = system_template + lib.load_chat_template(seed_prompt)
+    elif isinstance(seed_prompt,str):
+        chat_template = system_template + [{"role": "user", "content": seed_prompt}]
+    else:
+        raise ValueError(f"Cannot handle seed_prompt")
 
     if reference_existing:
         chat_template[-1]["content"] += (
@@ -616,11 +582,17 @@ def prompt_update(filelist, seed_prompt, model=None, reference_existing=[]):
         + "</filename2>\n"
         + "\n"
         + "Do not add any explanations or commentary outside of these tags.\n"
-        + "Note that some of these files may be requested to be treated as read-only or may not be appended.\n"
+        + "Note that some of these files may be requested to be treated as \n"
+        + "read-only or may not be appended.\n"
         + "Do not edit files if they are not appended or requested as read-only."
     )
 
-    chat_template = system_template + lib.load_chat_template(seed_prompt)
+    if os.path.exists(seed_prompt):
+        chat_template = system_template + lib.load_chat_template(seed_prompt)
+    elif isinstance(seed_prompt,str):
+        chat_template = system_template + [{"role": "user", "content": seed_prompt}]
+    else:
+        raise ValueError(f"Cannot handle seed_prompt")
 
     if set(filelist) & set(reference_existing):
         raise ValueError("Reference and target files should be mutually exclusive")
