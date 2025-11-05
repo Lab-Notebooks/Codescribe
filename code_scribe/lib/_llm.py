@@ -4,7 +4,8 @@
 import re
 import os, sys, importlib, json, requests
 
-from typing import Optional, List, Dict
+from typing import List, Dict, Union
+from pathlib import Path
 from alive_progress import alive_bar
 
 from code_scribe import lib
@@ -17,7 +18,7 @@ class OpenAIModel:
         self.outputs = 1
         self.max_tokens = 4096
 
-    def chat(self, chat_template):
+    def chat(self, chat_template: List[Dict[str, str]]) -> str:
         # We use the Chat Completion endpoint for chat like inputs
         response = self.pipeline.chat.completions.create(
             # model used here is ChatGPT
@@ -50,7 +51,7 @@ class ArgoModel:
 
         self.model = model
 
-    def chat(self, chat_template):
+    def chat(self, chat_template: List[Dict[str, str]]) -> str:
 
         if chat_template[0]["role"] == "system":
             system_prompt = chat_template[0]["content"]
@@ -244,7 +245,7 @@ class TFModel:
         self.batch_size = 8
         self.max_length = None
 
-    def chat(self, chat_template):
+    def chat(self, chat_template: List[Dict[str, str]]) -> str:
 
         chat_template = _merge_system_with_user(chat_template)
 
@@ -263,7 +264,9 @@ class TFModel:
         return results[0]["generated_text"][-1]["content"]
 
 
-def _merge_system_with_user(chat_template):
+def _merge_system_with_user(
+    chat_template: List[Dict[str, str]]
+) -> List[Dict[str, str]]:
     """
     Remove system role and prepend its contents to the first
     user role
@@ -281,7 +284,7 @@ def _merge_system_with_user(chat_template):
     return chat_template
 
 
-def _set_neural_model(model):
+def _set_neural_model(model: Union[Path, str]) -> object:
     """
     Set neural model based on options
     """
@@ -306,7 +309,12 @@ def _set_neural_model(model):
     return neural_model
 
 
-def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
+def prompt_translate(
+    mapping: List[str],
+    seed_prompt: Path,
+    model: Union[Path, str] = None,
+    save_prompts: bool = False,
+) -> None:
     """
     perform translation using prompts and the supplied model.
     """
@@ -411,8 +419,12 @@ def prompt_translate(mapping, seed_prompt, model=None, save_prompts=False):
 
 
 def prompt_inspect(
-    filelist, query_prompt, file_index={}, model=None, save_prompts=False
-):
+    filelist: List[Path],
+    query_prompt: str,
+    file_index: Dict[str, str] = {},
+    model: Union[Path, str] = None,
+    save_prompts: bool = False,
+) -> None:
     """
     Perform inspect on a list of files using a query prompt
     """
@@ -480,7 +492,12 @@ def prompt_inspect(
         print(result)
 
 
-def prompt_generate(seed_prompt, model=None, save_prompts=False, reference_existing=[]):
+def prompt_generate(
+    seed_prompt: Union[Path, str],
+    model: Union[Path, str] = None,
+    save_prompts: bool = False,
+    reference_existing: List[Path] = [],
+) -> None:
     """
     Perform code understanding
     """
@@ -557,7 +574,12 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False, reference_exist
             print(f"Wrote {filename}")
 
 
-def prompt_update(filelist, seed_prompt, model=None, reference_existing=[]):
+def prompt_update(
+    filelist: List[Path],
+    seed_prompt: Union[Path, str],
+    model: Union[Path, str] = None,
+    reference_existing: List[Path] = [],
+):
     """
     Perform code understanding
     """

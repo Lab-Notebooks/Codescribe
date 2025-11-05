@@ -7,6 +7,7 @@ export CODESCRIBE_MODEL="argo-gpt4o"
 
 cd $CODESCRIBE_TUTORIAL_PATH/src
 code-scribe index .
+code-scribe inspect Solver.F90 -q "Explain what this file is trying to do."
 code-scribe draft Initialize.F90
 code-scribe translate Initialize.F90 -p ../prompts/code_translation.toml
 
