@@ -2,7 +2,7 @@
 
 # Standard libraries
 import subprocess
-import pkg_resources
+import metadata
 
 # Feature libraries
 import click
@@ -24,4 +24,4 @@ def code_scribe(ctx: click.Context, version: bool) -> None:
         )
 
     if version:
-        click.echo(pkg_resources.require("CodeScribe")[0].version)
+        click.echo(metadata.__version__)
