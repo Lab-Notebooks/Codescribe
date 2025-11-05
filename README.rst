@@ -66,7 +66,7 @@ throughout the conversion.
  Installation
 **************
 
-At present we recommened installing Code-Scribe in development mode
+At present we recommend installing Code-Scribe in development mode
 
 .. code::
 
@@ -81,7 +81,7 @@ source code and is an effective method for debugging. Note that the
    pip install click
 
 The ``code-scribe`` script is installed in ``$HOME/.local/bin``
-directory and therfore the environment variable, ``PATH``, should be
+directory and therefore the environment variable, ``PATH``, should be
 updated to include this location for command line use.
 
 *******
@@ -108,7 +108,7 @@ understanding of their functionality
      inspect    Perform a generative AI inspection on Fortran files
      translate  Perform a generative AI conversion of Fortran files
 
-Following is a breif overview of different commands:
+Following is a brief overview of different commands:
 
 #. ``code-scribe index <project_root_dir>`` - Parses the project
    directory tree and creates a ``scribe.yaml`` file at each node along
@@ -148,7 +148,7 @@ Following is a breif overview of different commands:
    generative AI. You can either download a model locally from
    huggingface and provide it as an option to ``-m`` or you can simply
    set ``-m openai`` to use OpenAI API to perform code translation. Note
-   that ``-m openai`` requires the environemnt variable
+   that ``-m openai`` requires the environment variable
    ``OPENAI_API_KEY`` to be set. The ``<prompt.toml>`` is a chat
    template that guides AI to perform code translation using the source
    and draft ``.scribe`` files.
@@ -179,8 +179,8 @@ Following is a breif overview of different commands:
 
 #. ``code-scribe translate <filelist> -p <seed_prompt.toml>
    --save-prompts``: This command allows generation of file specific
-   json chat template that one can copy/paste to chat interfaces like
-   that of ChatGPT to generate the source code. The json files are
+   JSON chat template that one can copy/paste to chat interfaces like
+   that of ChatGPT to generate the source code. The JSON files are
    created from the seed prompt file and appended with source and draft
    code.
 
@@ -213,7 +213,7 @@ Following is a breif overview of different commands:
 
       export OPENAI_API_KEY="your_openai_api_key_here"
 
-   And you have installed the openai library
+   And you have installed the OpenAI library
 
    .. code::
 
