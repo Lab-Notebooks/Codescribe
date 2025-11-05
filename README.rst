@@ -66,23 +66,22 @@ throughout the conversion.
  Installation
 **************
 
-At present we recommend installing Code-Scribe in development mode
+At present we recommend installing Code-Scribe in an virtual environment:
 
 .. code::
 
-   ./setup develop
+   python3 -m venv env
+   source env/bin/activate
+   pip install --upgrade pip
 
-Development mode enables testing of features/updates directly from the
-source code and is an effective method for debugging. Note that the
-``setup`` script relies on ``click``, which can be installed using,
+And install Code-Scribe using the ``pip`` in editable mode:
 
 .. code::
 
-   pip install click
+   pip install -e .
 
-The ``code-scribe`` script is installed in ``$HOME/.local/bin``
-directory and therefore the environment variable, ``PATH``, should be
-updated to include this location for command line use.
+Editable mode enables testing of features/updates directly from the
+source code and is an effective method for debugging.
 
 *******
  Usage
