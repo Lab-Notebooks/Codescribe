@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# CodeScribe Quicktest
+
+export CODESCRIBE_TUTORIAL_PATH="../codescribe-tutorial"
+export CODESCRIBE_MODEL="argo-gpt4o"
+
+cd $CODESCRIBE_TUTORIAL_PATH/src
+code-scribe index .
+code-scribe draft Initialize.F90
+code-scribe translate Initialize.F90 -p ../prompts/code_translation.toml
+
+cat Initialize.scribe Initialize.cpp Initialize.hpp Initialize_fi.F90
+rm Initialize.cpp Initialize.hpp Initialize_fi.F90 Initialize.scribe
+
+cd ..
+code-scribe generate prompts/code_generation.toml
+cd generated-src && make && ./main && cd ..
+
+code-scribe generate \
+"Write complicated.toml file to generate a more complicated application in generated-src" \
+-r prompts/code_generation.toml
+
+code-scribe generate complicated.toml
+
+code-scribe update generated-src/main.cpp generated-src/Makefile -p prompts/code_update.tom
+
+code-scribe update src/main.cpp src/Solver.F90 src/Initialize.F90 \
+	-p "Write a detailed documentation in the comment section of these files"
+
+cat src/main.cpp src/Solver.F90 src/Initialize.F90
+git checkout src/main.cpp src/Solver.F90 src/Initialize.F90
