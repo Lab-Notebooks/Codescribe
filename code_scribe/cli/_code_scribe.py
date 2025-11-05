@@ -2,7 +2,7 @@
 
 # Standard libraries
 import subprocess
-import metadata
+from importlib import metadata
 
 # Feature libraries
 import click
@@ -24,4 +24,4 @@ def code_scribe(ctx: click.Context, version: bool) -> None:
         )
 
     if version:
-        click.echo(metadata.__version__)
+        click.echo(metadata.version("CodeScribe"))
