@@ -1,0 +1,4 @@
+[submodule "tutorial"]
+	path = tutorial
+	url = git@github.com:akashdhruv/codescribe-tutorial.git
+        branch = main

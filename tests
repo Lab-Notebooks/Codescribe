@@ -2,7 +2,7 @@
 
 # CodeScribe Quicktest
 
-export CODESCRIBE_TUTORIAL_PATH="../codescribe-tutorial"
+export CODESCRIBE_TUTORIAL_PATH="tutorial"
 export CODESCRIBE_MODEL="argo-gpt4o"
 
 cd $CODESCRIBE_TUTORIAL_PATH/src
