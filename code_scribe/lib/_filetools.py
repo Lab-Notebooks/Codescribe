@@ -194,7 +194,7 @@ def format_text_block(text, width=100, indent_step=3):
         indent = len(stripped) - len(stripped.lstrip())
 
         if stripped.startswith("-"):
-            stripped = "-" + " " * 2 + stripped.split("-",1)[1].lstrip()
+            stripped = "-" + " " * 2 + stripped.split("-", 1)[1].lstrip()
 
         if indent > 0:
             indent = max(indent + 1, 3) // indent_step * indent_step
@@ -255,8 +255,8 @@ def create_scribe_yaml(root_directory):
     """Traverses the directory and creates scribe.yaml files for Fortran files."""
     for dirpath, _, filenames in os.walk(root_directory):
         scribe_data = {
-            "root": root_directory,
-            "directory": dirpath.replace(root_directory + os.sep, ""),
+            "root": str(root_directory),
+            "directory": dirpath.replace(str(root_directory) + os.sep, ""),
             "files": {},
         }
 

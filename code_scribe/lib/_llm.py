@@ -515,7 +515,7 @@ def prompt_generate(seed_prompt, model=None, save_prompts=False, reference_exist
 
     if os.path.exists(seed_prompt):
         chat_template = system_template + lib.load_chat_template(seed_prompt)
-    elif isinstance(seed_prompt,str):
+    elif isinstance(seed_prompt, str):
         chat_template = system_template + [{"role": "user", "content": seed_prompt}]
     else:
         raise ValueError(f"Cannot handle seed_prompt")
@@ -589,10 +589,10 @@ def prompt_update(filelist, seed_prompt, model=None, reference_existing=[]):
 
     if os.path.exists(seed_prompt):
         chat_template = system_template + lib.load_chat_template(seed_prompt)
-    elif isinstance(seed_prompt,str):
+    elif isinstance(seed_prompt, str):
         chat_template = system_template + [{"role": "user", "content": seed_prompt}]
     else:
-        raise ValueError(f"Cannot handle seed_prompt")
+        raise ValueError(f"Cannot handle seed_prompt type: {type(seed_prompt)}")
 
     if set(filelist) & set(reference_existing):
         raise ValueError("Reference and target files should be mutually exclusive")

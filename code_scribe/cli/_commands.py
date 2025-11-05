@@ -2,6 +2,8 @@
 
 # Standard libraries
 import os
+from pathlib import Path
+from typing import Union, List
 
 # Feature libraries
 import click
@@ -13,7 +15,7 @@ from code_scribe import lib
 
 @code_scribe.command(name="index")
 @click.argument("root-dir", required=True, type=click.Path(exists=True))
-def index(root_dir):
+def index(root_dir: Path) -> None:
     """
     \b
     Index Fortran files along a project directory tree
@@ -25,13 +27,13 @@ def index(root_dir):
     and functions
     \b
     """
-    message = api.index(os.path.abspath(root_dir))
+    message: str = api.index(Path(os.path.abspath(root_dir)))
     click.echo(message)
 
 
 @code_scribe.command(name="draft")
 @click.argument("fortran-files", nargs=-1, required=True, type=click.Path(exists=True))
-def draft(fortran_files):
+def draft(fortran_files: List[Path]) -> None:
     """
     \b
     Perform a draft conversion from Fortran to C++
@@ -42,7 +44,7 @@ def draft(fortran_files):
     prepare a list of files for generative AI use
     \b
     """
-    api.draft(fortran_files)
+    api.draft([Path(file) for file in fortran_files])
 
 
 @code_scribe.command(name="translate")
@@ -65,7 +67,12 @@ def draft(fortran_files):
     help="Save file specific prompts to json file",
     mutually_exclusive=["model"],
 )
-def translate(fortran_files, seed_prompt, model, save_prompts):
+def translate(
+    fortran_files: List[Path],
+    seed_prompt: Path,
+    model: Union[str, Path],
+    save_prompts: bool,
+) -> None:
     """
     \b
     Perform a generative AI conversion of Fortran files
@@ -81,7 +88,12 @@ def translate(fortran_files, seed_prompt, model, save_prompts):
         raise click.UsageError(
             "Please provide either the '--model/-m' or '--save-prompts/-p' option"
         )
-    api.translate(fortran_files, seed_prompt, model, save_prompts)
+    api.translate(
+        [Path(file) for file in fortran_files],
+        Path(seed_prompt),
+        model,
+        save_prompts,
+    )
 
 
 @code_scribe.command(name="generate")
@@ -108,7 +120,12 @@ def translate(fortran_files, seed_prompt, model, save_prompts):
     multiple=True,
     help="List of reference files",
 )
-def generate(seed_prompt, model, save_prompts, reference_existing):
+def generate(
+    seed_prompt: Union[Path, str],
+    model: Union[Path, str],
+    save_prompts: bool,
+    reference_existing: List[Path],
+) -> None:
     """
     \b
     Perform AI based code generation
@@ -123,7 +140,12 @@ def generate(seed_prompt, model, save_prompts, reference_existing):
         raise click.UsageError(
             "Please provide either the '--model/-m' or '--save-prompts/-p' option"
         )
-    api.generate(seed_prompt, model, save_prompts, reference_existing)
+    api.generate(
+        seed_prompt,
+        model,
+        save_prompts,
+        [Path(file) for file in reference_existing],
+    )
 
 
 @code_scribe.command(name="update")
@@ -147,7 +169,12 @@ def generate(seed_prompt, model, save_prompts, reference_existing):
     multiple=True,
     help="List of reference files",
 )
-def update(filelist, seed_prompt, model, reference_existing):
+def update(
+    filelist: List[Path],
+    seed_prompt: Union[Path, str],
+    model: [Path, str],
+    reference_existing: List[Path],
+) -> None:
     """
     \b
     Perform a generative AI generation of code in a file
@@ -158,7 +185,12 @@ def update(filelist, seed_prompt, model, reference_existing):
     based on specifications given in the prompt/
     \b
     """
-    api.update(filelist, seed_prompt, model, reference_existing)
+    api.update(
+        [Path(file) for file in filelist],
+        seed_prompt,
+        model,
+        [Path(file) for file in reference_existing],
+    )
 
 
 @code_scribe.command(name="inspect")
@@ -179,7 +211,12 @@ def update(filelist, seed_prompt, model, reference_existing):
     help="Save file specific prompts to json file",
     mutually_exclusive=["model"],
 )
-def inspect(fortran_files, query_prompt, model, save_prompts):
+def inspect(
+    fortran_files: List[Path],
+    query_prompt: str,
+    model: Union[str, Path],
+    save_prompts: bool,
+) -> None:
     """
     \b
     Perform a generative AI inspection on Fortran files
@@ -196,14 +233,19 @@ def inspect(fortran_files, query_prompt, model, save_prompts):
             "Please provide either the '--model/-m' or '--save-prompts/-p' option"
         )
 
-    api.inspect(fortran_files, query_prompt, model, save_prompts)
+    api.inspect(
+        [Path(file) for file in fortran_files],
+        query_prompt,
+        model,
+        save_prompts,
+    )
 
 
 @code_scribe.command(name="format")
 @click.argument(
     "seed-prompt-list", nargs=-1, required=True, type=click.Path(exists=True)
 )
-def format(seed_prompt_list):
+def format(seed_prompt_list: List[Path]) -> None:
     """
     \b
     Format TOML seed prompt files
@@ -215,4 +257,4 @@ def format(seed_prompt_list):
     format
     \b
     """
-    api.format(seed_prompt_list)
+    api.format([Path(file) for file in seed_prompt_list])

@@ -1,10 +1,14 @@
 """Command line interface for Jobrunner"""
 
 import os
+
+from pathlib import Path
+from typing import Union, List
+
 from code_scribe import lib
 
 
-def index(root_dir):
+def index(root_dir: Path) -> str:
     """
     API command for creating an index for directory tree
     """
@@ -12,9 +16,9 @@ def index(root_dir):
     return f"Project structure saved to scribe.yaml."
 
 
-def draft(fortran_files):
+def draft(fortran_files: List[Path]) -> None:
     """
-    API command for creating a draft files
+    API command for creating draft files
     """
     file_index = lib.create_file_indexes()
 
@@ -23,17 +27,27 @@ def draft(fortran_files):
         print(message)
 
 
-def translate(filelist, seed_prompt, model, save_prompts=False):
+def translate(
+    filelist: List[Path],
+    seed_prompt: Path,
+    model: Union[Path, str],
+    save_prompts: bool = False,
+) -> None:
     """
-    API command for creating a draft files
+    API command for creating draft files
     """
     mapping = lib.create_src_mapping(filelist)
     lib.prompt_translate(mapping, seed_prompt, model=model, save_prompts=save_prompts)
 
 
-def inspect(filelist, query_prompt, model, save_prompts=False):
+def inspect(
+    filelist: List[Path],
+    query_prompt: str,
+    model: Union[Path, str],
+    save_prompts: bool = False,
+) -> None:
     """
-    API command for creating a draft files
+    API command for inspecting files
     """
     file_index = {}  # lib.create_file_indexes()
     lib.prompt_inspect(
@@ -41,9 +55,14 @@ def inspect(filelist, query_prompt, model, save_prompts=False):
     )
 
 
-def generate(seed_prompt, model, save_prompts=False, reference_existing=[]):
+def generate(
+    seed_prompt: Union[Path, str],
+    model: Union[Path, str],
+    save_prompts: bool = False,
+    reference_existing: List[Path] = [],
+) -> None:
     """
-    API command for creating a draft files
+    API command for generating files
     """
     lib.prompt_generate(
         seed_prompt,
@@ -53,9 +72,14 @@ def generate(seed_prompt, model, save_prompts=False, reference_existing=[]):
     )
 
 
-def update(filelist, seed_prompt, model, reference_existing=[]):
+def update(
+    filelist: List[Path],
+    seed_prompt: Union[Path, str],
+    model: Union[Path, str],
+    reference_existing: List[Path] = [],
+) -> None:
     """
-    API command for creating a draft files
+    API command for updating files
     """
     lib.prompt_update(
         filelist,
@@ -65,7 +89,7 @@ def update(filelist, seed_prompt, model, reference_existing=[]):
     )
 
 
-def format(seed_prompt_list):
+def format(seed_prompt_list: List[Path]) -> None:
     """
     Format toml files
     """
