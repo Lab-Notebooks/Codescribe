@@ -1,14 +1,16 @@
 import re
 import os
-import pathlib
 import toml
 import yaml
+
+from pathlib import Path
 from textwrap import wrap
+from typing import List, Dict, Set, Any
 
 from code_scribe import lib
 
 
-def load_chat_template(filepath):
+def load_chat_template(filepath: Path) -> List[Dict[str, str]]:
     """
     Load and validate a chat prompt file.
 
@@ -27,7 +29,7 @@ def load_chat_template(filepath):
       - No two consecutive roles may be identical
       - Multi-line content **must** use triple single quotes (''' ... ''')
     """
-    path = pathlib.Path(filepath)
+    path = Path(filepath)
     if path.suffix != ".toml":
         raise ValueError(
             f"Unsupported file extension '{path.suffix}'. Expected '.toml'."
@@ -109,14 +111,14 @@ def load_chat_template(filepath):
     return chat_template
 
 
-def detect_chat_style(raw_text):
+def detect_chat_style(raw_text: str) -> str:
     """Return 'split' if [[chat.user]] found, else 'grouped'."""
     return (
         "split" if re.search(r"\[\[chat\.(user|assistant)\]\]", raw_text) else "grouped"
     )
 
 
-def format_seed_prompt(filepath):
+def format_seed_prompt(filepath: Path) -> None:
     """
     Format TOML chat file in place using format_text_block().
     - Preserves all comments, headers, and blank lines exactly.
@@ -124,7 +126,7 @@ def format_seed_prompt(filepath):
     - Replaces each content block sequentially in the raw file.
     """
 
-    path = pathlib.Path(filepath)
+    path = Path(filepath)
     raw_text = path.read_text()
     chat_entries = load_chat_template(filepath)
     style = detect_chat_style(raw_text)
@@ -171,7 +173,7 @@ def format_seed_prompt(filepath):
     path.write_text(formatted_text)
 
 
-def format_text_block(text, width=100, indent_step=3):
+def format_text_block(text: str, width: int = 100, indent_step: int = 3) -> str:
     """
     Cleanly format a text block (like Markdown or TOML content).
 
@@ -222,7 +224,7 @@ def format_text_block(text, width=100, indent_step=3):
     return "\n".join(formatted).rstrip() + "\n"
 
 
-def extract_fortran_info(filepath):
+def extract_fortran_info(filepath: Path) -> Dict[str, List[str]]:
     """Extracts module and subroutine/function names from a Fortran file."""
     info = {"modules": [], "subroutines": [], "functions": []}
 
@@ -251,7 +253,7 @@ def extract_fortran_info(filepath):
     return info
 
 
-def create_scribe_yaml(root_directory):
+def create_scribe_yaml(root_directory: Path) -> None:
     """Traverses the directory and creates scribe.yaml files for Fortran files."""
     for dirpath, _, filenames in os.walk(root_directory):
         scribe_data = {
@@ -275,13 +277,13 @@ def create_scribe_yaml(root_directory):
                 yaml.dump(scribe_data, yaml_file, default_flow_style=False)
 
 
-def load_scribe_yaml(file_path):
+def load_scribe_yaml(file_path: Path) -> Dict[str, str]:
     """Load the content of a scribe.yaml file."""
     with open(file_path, "r") as yaml_file:
         return yaml.safe_load(yaml_file)
 
 
-def create_file_indexes():
+def create_file_indexes() -> Dict[str, str]:
     """
     Create a combined index for files, subroutines, functions,
     and modules from all scribe.yaml files in the directory tree.
@@ -333,17 +335,12 @@ def create_file_indexes():
     return file_index
 
 
-def filter_file_indexes(sfile, file_index, function_calls=[]):
+def filter_file_indexes(
+    sfile: Path, file_index: Dict[str, str], function_calls: Set[str] = []
+) -> Dict[str, Path]:
     """
-    Extract modules, subroutines, and variable declarations used in the given Fortran source file,
-    and return a subset of the file_index that corresponds to these.
-
-    Args:
-        sfile (str): The Fortran source file to analyze.
-        file_index (dict): The complete item index list to filter from.
-
-    Returns:
-        dict: A subset of the file_index containing only the used modules, subroutines, and variables.
+    Extract modules, subroutines, and variable declarations used in the given
+    Fortran source file, and return a subset of the file_index that corresponds to these.
     """
     used_modules = set()
     used_subroutines = set()
@@ -375,7 +372,8 @@ def filter_file_indexes(sfile, file_index, function_calls=[]):
         print(f"An error occurred while reading the file: {e}")
         return {}
 
-    # Filter the file_index to return only the modules, subroutines, and variables used in this file
+    # Filter the file_index to return only the modules, subroutines, and
+    # variables used in this file
     filtered_file_index = {
         name: path
         for name, path in file_index.items()
@@ -388,15 +386,10 @@ def filter_file_indexes(sfile, file_index, function_calls=[]):
     return filtered_file_index
 
 
-def isolate_scalar_functions(sfile):
+def isolate_scalar_functions(sfile: Path) -> List[List[str]]:
     """
-    Isolate variables that are declared as scalars but used as functions in the given Fortran source file.
-
-    Args:
-        sfile (str): The Fortran source file to analyze.
-
-    Returns:
-        set: A set of scalar variables that are used as functions.
+    Isolate variables that are declared as scalars but used as functions
+    in the given Fortran source file.
     """
     scalar_variables = set()
     function_calls = set()
@@ -441,7 +434,7 @@ def isolate_scalar_functions(sfile):
     return scalar_used_as_functions, function_calls
 
 
-def query_construct(name, file_index):
+def query_construct(name: str, file_index: Dict[str, str]) -> List[str]:
     """Query the file path of a module, subroutine, or function."""
 
     # Find all matches for the given name
@@ -452,8 +445,12 @@ def query_construct(name, file_index):
     return matches if matches else None
 
 
-def extract_fortran_meta(sfile):
-    """Extract function, subroutine, module names, variables, and argument lists from Fortran source."""
+def extract_fortran_meta(sfile: Path) -> Dict[str, Any]:
+    """
+    Extract function, subroutine, module names, variables, and argument
+    lists from Fortran source.
+    """
+
     meta_info = []
     current_construct = None
     variables_declared = []
@@ -522,7 +519,7 @@ def extract_fortran_meta(sfile):
     return meta_info
 
 
-def annotate_fortran_file(sfile, file_index):
+def annotate_fortran_file(sfile: Path, file_index: Dict[str, str]) -> str:
     """
     Annotates a Fortran file, converts types to C++ equivalents,
     replaces use statements inline with namespaces, and adds headers.
@@ -557,8 +554,8 @@ def annotate_fortran_file(sfile, file_index):
         + "External functions are available in header files"
     )
     prompt_lines.append(
-        "scribe-prompt: Statement functions should be converted to equivalent lambda functions in C++. "
-        + "Include [&] in capture clause to use variables by reference"
+        "scribe-prompt: Statement functions should be converted to equivalent lambda "
+        + "functions in C++. Include [&] in capture clause to use variables by reference"
     )
 
     for construct in function_calls:
@@ -677,7 +674,7 @@ def annotate_fortran_file(sfile, file_index):
     return f"Generated draft file for LLM consumption {scribe_filename}"
 
 
-def create_src_mapping(filelist):
+def create_src_mapping(filelist: List[Path]) -> List[str]:
     """
     Build directory tree from neucol source code.
 
