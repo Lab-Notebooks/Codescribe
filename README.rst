@@ -307,6 +307,32 @@ Following is a brief overview of different commands:
 
    The saved prompts will be stored in a `scribe.json` file.
 
+***********************
+ Environment Variables
+***********************
+
+To streamline the usage of Code-Scribe and avoid repeatedly specifying
+the `-m` flag for model selection, you can set the environment variable
+`CODESCRIBE_MODEL` to the desired model name or path. For example:
+
+.. code::
+
+   export CODESCRIBE_MODEL="argo-gpt4o"
+
+This will automatically use the specified model for all commands without
+requiring the `-m` flag.
+
+Additionally, to archive interactions with LLMs for downstream analysis
+or debugging, you can set the `CODESCRIBE_ARCHIVE` environment variable
+to a directory path where the interactions will be stored:
+
+.. code::
+
+   export CODESCRIBE_ARCHIVE="/path/to/archive/directory"
+
+By setting these environment variables, you can simplify your workflow
+and ensure that all interactions are logged for future reference.
+
 By following these steps, you can integrate any of the supported
 language models into Code-Scribe and use them for incremental
 translation of Fortran codebases to C++. Please the source file
