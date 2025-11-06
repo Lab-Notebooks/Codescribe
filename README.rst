@@ -329,6 +329,18 @@ translation of Fortran codebases to C++. Please the source file
    url          = {https://github.com/akashdhruv/CodeScribe}
    }
 
+.. code::
+
+   @conference{dhruv_dubey_2025_3732775,
+   author       = {Akash Dhruv and Anshu Dubey},
+   title        = {Leveraging Large Language Models for Code Translation and Software Development in Scientific Computing},
+   year         = 2025,
+   doi          = {10.1145/3732775.3733572},
+   url          = {https://doi.org/10.1145/3732775.3733572},
+   publisher    = {Association for Computing Machinery},
+   booktitle    = {Proceedings of the Platform for Advanced Scientific Computing Conference}
+   }
+
 .. |Code style: black| image:: https://img.shields.io/badge/code%20style-black-000000.svg
    :target: https://github.com/psf/black
 

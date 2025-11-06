@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the following metadata."
+title: "codescribe"
+authors:
+  - family-names: "Dhruv"
+    given-names: "Akash"
+  - family-names: "Dubey"
+    given-names: "Anshu"
+date-released: "2025-01-01"
+version: "1.0.0"
+doi: "10.1145/3732775.3733572"
+url: "https://doi.org/10.1145/3732775.3733572"
+keywords:
+  - "large language models"
+  - "generative artificial intelligence"
+  - "scientific computing"
+  - "software development"
+  - "prompt engineering"
+  - "code translation"
+  - "language interoperability"
+references:
+  - type: "conference-paper"
+    authors:
+      - family-names: "Dhruv"
+        given-names: "Akash"
+      - family-names: "Dubey"
+        given-names: "Anshu"
+    title: "Leveraging Large Language Models for Code Translation and Software Development in Scientific Computing"
+    year: 2025
+    doi: "10.1145/3732775.3733572"
+    url: "https://doi.org/10.1145/3732775.3733572"
+    publisher: "Association for Computing Machinery"
+    booktitle: "Proceedings of the Platform for Advanced Scientific Computing Conference"
