@@ -136,7 +136,7 @@ def generate(
 
     \b
     This command applies generative AI to generate code
-    based on specifications given in the prompt/
+    based on specifications given in the prompt
     \b
     """
     if (not model) and (not save_prompts):
@@ -226,12 +226,12 @@ def inspect(
 ) -> None:
     """
     \b
-    Perform AI code inspection on Fortran files
+    Perform AI code inspection on files
     \b
 
     \b
     This command applies generative AI to inspect a list of
-    Fortran files and answer a query. Results may vary based
+    files and answer a query. Results may vary based
     on the the combination of files
     \b
     """

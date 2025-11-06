@@ -11,13 +11,17 @@
  Overview
 **********
 
-Code-Scribe is a tool designed to facilitate incremental translation of
-Fortran codebases into C++ using generative AI. It automates the process
-of generating corresponding C++ source files and creating Fortran-C
+Code-Scribe is an AI-assisted framework designed to streamline
+Fortran-to-C++ code translation and facilitate the development and
+maintenance of scientific codebases. It automates the process of
+generating corresponding C++ source files and creating Fortran-C
 interfaces, simplifying the integration of Fortran and C++. The tool
-also allows users to interface with large language models (LLMs) through
-the Transformers API and create custom prompts tailored to the specific
-needs of the source code.
+allows users to interface with large language models (LLMs) through the
+API endpoints and locally through the Transformers library, and allows
+creation of custom prompts tailored to the specific needs of the source
+code. Code-Scribe empowers research software engineers by complementing
+existing tools like OpenAI Codex and addressing the niche requirements
+of scientific software development.
 
 ***********
  Resources
@@ -57,6 +61,9 @@ needs of the source code.
 -  Fortran-C Interfaces: Generate the necessary interface layers between
    Fortran and C++ for easy function and subroutine conversion.
 
+-  Code Generation and Update: Create new source files or modifying
+   existing from natural-language prompts.
+
 *******************
  Statement of Need
 *******************
@@ -71,7 +78,9 @@ iteratively converting the code, is a more practical approach.
 Code-Scribe supports this process by automating the creation of these
 interfaces and assisting with generative AI to improve efficiency and
 accuracy, ensuring that performance and functionality are maintained
-throughout the conversion.
+throughout the conversion. Additionally, Code-Scribe facilitates code
+generation and updates, enabling users to create new applications or
+modify existing files seamlessly.
 
 **************
  Installation
@@ -115,9 +124,12 @@ understanding of their functionality
 
    Commands:
      draft      Perform a draft conversion from Fortran to C++
+     format     Format TOML seed prompt files
+     generate   Perform AI based code generation
      index      Index Fortran files along a project directory tree
-     inspect    Perform a generative AI inspection on Fortran files
-     translate  Perform a generative AI conversion of Fortran files
+     inspect    Perform AI code inspection on files
+     translate  Perform AI based code conversion of Fortran files
+     update     Perform AI based code update on files
 
 Following is a brief overview of different commands:
 
@@ -168,24 +180,19 @@ Following is a brief overview of different commands:
 
       # Example contents of seed_prompt.toml
 
-      [[chat]]
-      role = "user"
+      [[chat.user]]
       content = "‹Rules and syntax-related instructions for code conversion>"
 
-      [[chat]]
-      role = "assistant"
+      [[chat.assistant]]
       content = "I am ready. Please give me a test problem."
 
-      [[chat]]
-      role = "user"
+      [[chat.user]]
       content = "<Template of contents in a source file>"
 
-      [[chat]]
-      role = "assistant"
+      [[chat.assistant]]
       content = "<Desired contents of the converted file. Syntactically correct code>"
 
-      [[chat]]
-      role = "user"
+      [[chat.user]]
       content = "<Append code from a source file>"
 
 #. ``code-scribe translate <filelist> -p <seed_prompt.toml>
@@ -194,6 +201,18 @@ Following is a brief overview of different commands:
    that of ChatGPT to generate the source code. The JSON files are
    created from the seed prompt file and appended with source and draft
    code.
+
+#. ``code-scribe generate <seed_prompt> -m <model_name_or_path>``:
+   Generate new source files or applications based on specifications in
+   the prompt.
+
+#. ``code-scribe update <filelist> -p <seed_prompt.toml> -m
+   <model_name_or_path>``: Modify or extend existing source files using
+   seed prompt files.
+
+#. ``code-scribe update <filelist> -p "<natural-language-prompt>" -r
+   <referene_file> -m <model_name_or_path>``: This command allows for
+   updating files using natural language prompts and reference files.
 
 #. ``code-scribe inspect <filelist> -q <query_prompt> -m
    <model_name_or_path>``: Perform a query on a set of source files
@@ -209,7 +228,7 @@ Following is a brief overview of different commands:
 
 #. **OpenAI Model**: Code-Scribe supports OpenAI's GPT models (such as
    `gpt-4`, `gpt-3.5-turbo`, etc.) via the OpenAI API. To use OpenAI's
-   models, specify `-m openai-gpt-4o` in the `translate` command, as
+   models, specify `-m openai-gpt-4o` when executing the commands, as
    shown below:
 
    .. code::
@@ -253,11 +272,34 @@ Following is a brief overview of different commands:
 You can download a model from the Hugging Face model hub by visiting
 `https://huggingface.co/models` and choosing one that fits your needs.
 
-#. **Saving Custom Prompts**: After selecting a model and running the
-   translation command, you can also save the generated prompts for
-   later use. Use the `--save-prompts` flag to store the prompts in a
-   JSON format. This is useful if you want to copy and paste the prompts
-   into an external tool, like ChatGPT, for further refinement.
+#. **ARGOModel Integration**: Code-Scribe also supports integration with
+   Argonne's ARGO models, such as `argo-gpt4o`. These models are
+   accessible on the Argonne network by setting the environment
+   variables `ARGO_USER` and `ARGO_API_ENDPOINT`. To use ARGO models,
+   specify `-m argo-gpt4o` or any other ARGO supported model of your
+   choice when executing commands, as shown below:
+
+   .. code::
+
+      ▶ code-scribe translate <filelist> -m argo-gpt4o -p <seed_prompt.toml>
+
+   Ensure that the environment variables `ARGO_USER` and
+   `ARGO_API_ENDPOINT` are set correctly. For example:
+
+   .. code::
+
+      export ARGO_USER="your_argo_username"
+      export ARGO_API_ENDPOINT="https://argo.api.endpoint"
+
+   ARGO models provide optimized performance for scientific computing
+   tasks and are recommended for users with access to the Argonne
+   network.
+
+#. **Saving Custom Prompts**: Instead of selecting a model and running
+   the commands interactively, you can also save the generated prompts
+   for later use. Use the `--save-prompts` flag to store the prompts in
+   a JSON format. This is useful if you want to copy and paste the
+   prompts into an external tool, like ChatGPT, for further refinement.
 
    .. code::
 
