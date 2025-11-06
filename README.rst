@@ -269,15 +269,16 @@ Following is a brief overview of different commands:
 
       ▶ code-scribe translate <filelist> -m <path_to_model> -p <seed_prompt.toml>
 
-You can download a model from the Hugging Face model hub by visiting
-`https://huggingface.co/models` and choosing one that fits your needs.
+   You can download a model from the Hugging Face model hub by visiting
+   `https://huggingface.co/models` and choosing one that fits your
+   needs.
 
-#. **ARGOModel Integration**: Code-Scribe also supports integration with
-   Argonne's ARGO models, such as `argo-gpt4o`. These models are
-   accessible on the Argonne network by setting the environment
-   variables `ARGO_USER` and `ARGO_API_ENDPOINT`. To use ARGO models,
-   specify `-m argo-gpt4o` or any other ARGO supported model of your
-   choice when executing commands, as shown below:
+#. **ARGO Models**: Code-Scribe also supports integration with Argonne's
+   ARGO models, such as `argo-gpt4o`. These models are accessible on the
+   Argonne network by setting the environment variables `ARGO_USER` and
+   `ARGO_API_ENDPOINT`. To use ARGO models, specify `-m argo-gpt4o` or
+   any other ARGO supported model of your choice when executing
+   commands, as shown below:
 
    .. code::
 
@@ -289,10 +290,9 @@ You can download a model from the Hugging Face model hub by visiting
    .. code::
 
       export ARGO_USER="your_argo_username"
-      export ARGO_API_ENDPOINT="https://argo.api.endpoint"
+      export ARGO_API_ENDPOINT="argo_api_endpoint"
 
-   ARGO models provide optimized performance for scientific computing
-   tasks and are recommended for users with access to the Argonne
+   ARGO models are recommended for users with access to the Argonne
    network.
 
 #. **Saving Custom Prompts**: Instead of selecting a model and running
@@ -303,7 +303,7 @@ You can download a model from the Hugging Face model hub by visiting
 
    .. code::
 
-      ▶ code-scribe translate <filelist> -m openai-gpt-4o -p <seed_prompt.toml> --save-prompts
+      ▶ code-scribe translate <filelist> -p <seed_prompt.toml> --save-prompts
 
    The saved prompts will be stored in a `scribe.json` file.
 
