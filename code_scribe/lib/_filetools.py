@@ -172,7 +172,7 @@ def format_seed_prompt(filepath: Path, chat_entries: List[Dict[str, str]] = []) 
 
     # Match any TOML content block: content = ''' ... ''' OR content = """ ... """
     pattern = re.compile(
-        r"content\s*=\s*(?P<quote>'''|\"\"\")([\s\S]*?)(?P=quote)", re.MULTILINE
+        r"content\s*=\s*(?P<quote>'''|\")([\s\S]*?)(?P=quote)", re.MULTILINE
     )
 
     parts = []
