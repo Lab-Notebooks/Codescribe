@@ -146,8 +146,8 @@ Following is a brief overview of different commands:
    <seed_prompt.toml>``: This command performs neural translation using
    generative AI. You can either download a model locally from
    huggingface and provide it as an option to ``-m`` or you can simply
-   set ``-m openai`` to use OpenAI API to perform code translation. Note
-   that ``-m openai`` requires the environment variable
+   set ``-m openai-gpt-4o`` to use OpenAI API to perform code translation. Note
+   that ``-m openai-gpt-4o`` requires the environment variable
    ``OPENAI_API_KEY`` to be set. The ``<prompt.toml>`` is a chat
    template that guides AI to perform code translation using the source
    and draft ``.scribe`` files.
@@ -197,12 +197,12 @@ Following is a brief overview of different commands:
 
 #. **OpenAI Model**: Code-Scribe supports OpenAI's GPT models (such as
    `gpt-4`, `gpt-3.5-turbo`, etc.) via the OpenAI API. To use OpenAI's
-   models, specify `-m openai` in the `translate` command, as shown
+   models, specify `-m openai-gpt-4o` in the `translate` command, as shown
    below:
 
    .. code::
 
-      ▶ code-scribe translate <filelist> -m openai -p <seed_prompt.toml>
+      ▶ code-scribe translate <filelist> -m openai-gpt-4o -p <seed_prompt.toml>
 
    Ensure that the environment variable `OPENAI_API_KEY` is set with
    your OpenAI API key. You can set it by running the following command
@@ -249,7 +249,7 @@ You can download a model from the Hugging Face model hub by visiting
 
    .. code::
 
-      ▶ code-scribe translate <filelist> -m openai -p <seed_prompt.toml> --save-prompts
+      ▶ code-scribe translate <filelist> -m openai-gpt-4o -p <seed_prompt.toml> --save-prompts
 
    The saved prompts will be stored in a `scribe.json` file.
 
