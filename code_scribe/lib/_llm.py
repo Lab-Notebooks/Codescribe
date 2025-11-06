@@ -35,6 +35,9 @@ class OpenAIModel:
 
         return response.choices[0].message.content
 
+    def __repr__(self) -> str:
+        return f"OpenAIModel(model='{self.model}', outputs={self.outputs}, max_tokens={self.max_tokens})"
+
 
 class ArgoModel:
     def __init__(self, model: str) -> None:
@@ -81,6 +84,9 @@ class ArgoModel:
         )
 
         return response.json()["response"]
+
+    def __repr__(self) -> str:
+        return f"ArgoModel(model='{self.model}', api_endpoint='***', user='***')"
 
 
 class KimiModel:
@@ -154,6 +160,9 @@ class KimiModel:
         except (KeyError, IndexError) as e:
             raise RuntimeError(f"Unexpected response format: {data}") from e
 
+    def __repr__(self) -> str:
+        return f"KimiModel(model='{self.model}', endpoint='***', outputs={self.outputs}, max_tokens={self.max_tokens})"
+
 
 class QwenModel:
     """
@@ -225,6 +234,9 @@ class QwenModel:
         except (KeyError, IndexError) as e:
             raise RuntimeError(f"Unexpected response format: {data}") from e
 
+    def __repr__(self) -> str:
+        return f"QwenModel(model='{self.model}', endpoint='***', outputs={self.outputs}, max_tokens={self.max_tokens})"
+
 
 class TFModel:
     def __init__(self, checkpoint_dir: Path) -> None:
@@ -232,6 +244,7 @@ class TFModel:
         torch = importlib.import_module("torch")
 
         self.tokenizer = transformers.AutoTokenizer.from_pretrained(checkpoint_dir)
+        self.config = transformers.AutoConfig.from_pretrained(checkpoint_dir)
         self.pipeline = transformers.pipeline(
             "text-generation",
             model=checkpoint_dir,
@@ -260,6 +273,9 @@ class TFModel:
         )
 
         return results[0]["generated_text"][-1]["content"]
+
+    def __repr__(self) -> str:
+        return f"TFModel(model={self.config.model_type}, max_new_tokens={self.max_new_tokens}, batch_size={self.batch_size}, max_length={self.max_length})"
 
 
 def _merge_system_with_user(
@@ -411,7 +427,8 @@ def prompt_translate(
                             fdest.write(fsource.group(1))
 
                 lib.create_archive_file(
-                    chat_template + [{"role": "assistant", "content": result}]
+                    chat_template + [{"role": "assistant", "content": result}],
+                    neural_model,
                 )
 
                 chat_template[-1]["content"] = cached_prompt
@@ -576,7 +593,7 @@ def prompt_generate(
             print(f"Wrote {filename}")
 
         lib.create_archive_file(
-            chat_template + [{"role": "assistant", "content": result}]
+            chat_template + [{"role": "assistant", "content": result}], neural_model
         )
 
 
@@ -677,5 +694,5 @@ def prompt_update(
             print(f"Wrote {filename}")
 
         lib.create_archive_file(
-            chat_template + [{"role": "assistant", "content": result}]
+            chat_template + [{"role": "assistant", "content": result}], neural_model
         )

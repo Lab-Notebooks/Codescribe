@@ -13,7 +13,9 @@ from typing import List, Dict, Set, Any
 from code_scribe import lib
 
 
-def create_archive_file(chat_entries: List[Dict[str, str]]) -> None:
+def create_archive_file(
+    chat_entries: List[Dict[str, str]], neural_model: object
+) -> None:
     """
     Create a new file under a dated folder structure: YYYY/MM/DD/timestamp_sha.toml
 
@@ -46,7 +48,10 @@ def create_archive_file(chat_entries: List[Dict[str, str]]) -> None:
         lines.append(content)
         lines.append("'''\n")
 
-    file_path.write_text("\n".join(lines))
+    metadata = [f"# {entry}" for entry in str(neural_model.__repr__()).split("\n")]
+    metadata.append("\n")
+
+    file_path.write_text("\n".join(metadata + lines))
     format_seed_prompt(file_path, chat_entries)
 
 
