@@ -25,16 +25,16 @@ needs of the source code.
 
 -  Papers:
 
-       * https://arxiv.org/abs/2410.24119
+      -  https://arxiv.org/abs/2410.24119
 
 -  Tutorials:
 
-       * https://anl.box.com/s/zv3zdbphqprdz8rjh1c84xpeqd8yg32u
-       * https://github.com/akashdhruv/codescribe-tutorial.git
+      -  https://anl.box.com/s/zv3zdbphqprdz8rjh1c84xpeqd8yg32u
+      -  https://github.com/akashdhruv/codescribe-tutorial.git
 
 -  Use cases:
 
-       * https://erf.readthedocs.io/en/latest/CouplingToNoahMP.html
+      -  https://erf.readthedocs.io/en/latest/CouplingToNoahMP.html
 
 **************
  Key Features
