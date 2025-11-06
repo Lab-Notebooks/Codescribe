@@ -75,7 +75,7 @@ def translate(
 ) -> None:
     """
     \b
-    Perform a generative AI conversion of Fortran files
+    Perform AI based code conversion of Fortran files
     \b
 
     \b
@@ -184,7 +184,7 @@ def update(
 ) -> None:
     """
     \b
-    Perform a generative AI generation of code in a file
+    Perform AI based code update on files
     \b
 
     \b
@@ -226,7 +226,7 @@ def inspect(
 ) -> None:
     """
     \b
-    Perform a generative AI inspection on Fortran files
+    Perform AI code inspection on Fortran files
     \b
 
     \b

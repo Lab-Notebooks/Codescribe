@@ -14,7 +14,8 @@ import click
 def code_scribe(ctx: click.Context, version: bool) -> None:
     """
     \b
-    Software development tool for converting code from Fortran to C++
+    Software development tool for code conversion and generation
+    for scientific computing applications
     """
     if ctx.invoked_subcommand is None and not version:
         subprocess.run(
