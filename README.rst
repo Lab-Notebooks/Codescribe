@@ -19,11 +19,22 @@ also allows users to interface with large language models (LLMs) through
 the Transformers API and create custom prompts tailored to the specific
 needs of the source code.
 
-Read the paper: https://arxiv.org/abs/2410.24119
+***********
+ Resources
+***********
 
-Tutorial Videos: https://anl.box.com/s/zv3zdbphqprdz8rjh1c84xpeqd8yg32u
+-  Papers:
 
-Tutorial Repo: https://github.com/akashdhruv/codescribe-tutorial.git
+       * https://arxiv.org/abs/2410.24119
+
+-  Tutorials:
+
+       * https://anl.box.com/s/zv3zdbphqprdz8rjh1c84xpeqd8yg32u
+       * https://github.com/akashdhruv/codescribe-tutorial.git
+
+-  Use cases:
+
+       * https://erf.readthedocs.io/en/latest/CouplingToNoahMP.html
 
 **************
  Key Features
@@ -66,7 +77,8 @@ throughout the conversion.
  Installation
 **************
 
-At present we recommend installing Code-Scribe in an virtual environment:
+At present we recommend installing Code-Scribe in an virtual
+environment:
 
 .. code::
 
@@ -146,11 +158,11 @@ Following is a brief overview of different commands:
    <seed_prompt.toml>``: This command performs neural translation using
    generative AI. You can either download a model locally from
    huggingface and provide it as an option to ``-m`` or you can simply
-   set ``-m openai-gpt-4o`` to use OpenAI API to perform code translation. Note
-   that ``-m openai-gpt-4o`` requires the environment variable
-   ``OPENAI_API_KEY`` to be set. The ``<prompt.toml>`` is a chat
-   template that guides AI to perform code translation using the source
-   and draft ``.scribe`` files.
+   set ``-m openai-gpt-4o`` to use OpenAI API to perform code
+   translation. Note that ``-m openai-gpt-4o`` requires the environment
+   variable ``OPENAI_API_KEY`` to be set. The ``<prompt.toml>`` is a
+   chat template that guides AI to perform code translation using the
+   source and draft ``.scribe`` files.
 
    .. code:: toml
 
@@ -197,8 +209,8 @@ Following is a brief overview of different commands:
 
 #. **OpenAI Model**: Code-Scribe supports OpenAI's GPT models (such as
    `gpt-4`, `gpt-3.5-turbo`, etc.) via the OpenAI API. To use OpenAI's
-   models, specify `-m openai-gpt-4o` in the `translate` command, as shown
-   below:
+   models, specify `-m openai-gpt-4o` in the `translate` command, as
+   shown below:
 
    .. code::
 
