@@ -3,11 +3,51 @@ import os
 import toml
 import yaml
 
+import datetime
+import hashlib
+
 from pathlib import Path
 from textwrap import wrap
 from typing import List, Dict, Set, Any
 
 from code_scribe import lib
+
+
+def create_archive_file(chat_entries: List[Dict[str, str]]) -> None:
+    """
+    Create a new file under a dated folder structure: YYYY/MM/DD/timestamp_sha.toml
+
+    Example output:
+        2025/11/06/013215_a3f1b9c7.toml
+
+    """
+    base_dir = os.getenv("CODESCRIBE_ARCHIVE")
+    if not base_dir:
+        return
+
+    now = datetime.datetime.now()
+    timestamp = now.strftime("%H%M%S")
+    date_path = now.strftime("%Y/%m/%d")
+    sha = hashlib.sha1(str(now.timestamp()).encode()).hexdigest()[:8]
+
+    folder = Path(base_dir) / date_path
+    folder.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{timestamp}_{sha}.toml"
+    file_path = folder / filename
+    file_path.touch()
+
+    lines = []
+    for entry in chat_entries:
+        role = entry["role"]
+        content = entry["content"].strip()
+        lines.append(f"[[chat.{role}]]")
+        lines.append("content = '''")
+        lines.append(content)
+        lines.append("'''\n")
+
+    file_path.write_text("\n".join(lines))
+    format_seed_prompt(file_path, chat_entries)
 
 
 def load_chat_template(filepath: Path) -> List[Dict[str, str]]:
@@ -111,14 +151,7 @@ def load_chat_template(filepath: Path) -> List[Dict[str, str]]:
     return chat_template
 
 
-def detect_chat_style(raw_text: str) -> str:
-    """Return 'split' if [[chat.user]] found, else 'grouped'."""
-    return (
-        "split" if re.search(r"\[\[chat\.(user|assistant)\]\]", raw_text) else "grouped"
-    )
-
-
-def format_seed_prompt(filepath: Path) -> None:
+def format_seed_prompt(filepath: Path, chat_entries: List[Dict[str, str]] = []) -> None:
     """
     Format TOML chat file in place using format_text_block().
     - Preserves all comments, headers, and blank lines exactly.
@@ -128,8 +161,9 @@ def format_seed_prompt(filepath: Path) -> None:
 
     path = Path(filepath)
     raw_text = path.read_text()
-    chat_entries = load_chat_template(filepath)
-    style = detect_chat_style(raw_text)
+
+    if not chat_entries:
+        chat_entries = load_chat_template(filepath)
 
     # Match any TOML content block: content = ''' ... ''' OR content = """ ... """
     pattern = re.compile(
