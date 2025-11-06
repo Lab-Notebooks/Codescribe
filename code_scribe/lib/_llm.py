@@ -410,6 +410,10 @@ def prompt_translate(
                         if fsource:
                             fdest.write(fsource.group(1))
 
+                lib.create_archive_file(
+                    chat_template + [{"role": "assistant", "content": result}]
+                )
+
                 chat_template[-1]["content"] = cached_prompt
 
             else:
@@ -571,6 +575,10 @@ def prompt_generate(
                 f.write(content.strip() + "\n")
             print(f"Wrote {filename}")
 
+        lib.create_archive_file(
+            chat_template + [{"role": "assistant", "content": result}]
+        )
+
 
 def prompt_update(
     filelist: List[Path],
@@ -667,3 +675,7 @@ def prompt_update(
             with open(filename, "w") as f:
                 f.write(content.strip() + "\n")
             print(f"Wrote {filename}")
+
+        lib.create_archive_file(
+            chat_template + [{"role": "assistant", "content": result}]
+        )
