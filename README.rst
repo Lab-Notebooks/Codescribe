@@ -14,11 +14,11 @@
 Code-Scribe is an AI-assisted framework designed to streamline
 Fortran-to-C++ code translation and facilitate the development and
 maintenance of scientific codebases. It automates the process of
-generating corresponding C++ source files and creating Fortran-C
+generating corresponding C++ source files and creating Fortran-C++
 interfaces, simplifying the integration of Fortran and C++. The tool
 allows users to interface with large language models (LLMs) through the
-API endpoints and locally through the Transformers library, and allows
-creation of custom prompts tailored to the specific needs of the source
+API endpoints and locally through the Transformers library, and enables
+the creation of custom prompts tailored to the specific needs of the source
 code. Code-Scribe empowers research software engineers by complementing
 existing tools like OpenAI Codex and addressing the niche requirements
 of scientific software development.
@@ -44,8 +44,8 @@ of scientific software development.
  Key Features
 **************
 
--  Incremental Translation: Translate Fortran codebase into C++
-   incrementally, creating Fortran-C layers for seamless
+-  Incremental Translation: Translate Fortran codebases into C++
+   incrementally, creating Fortran-C++ layers for seamless
    interoperability.
 
    |fig1|
@@ -58,11 +58,11 @@ of scientific software development.
 
    |fig2|
 
--  Fortran-C Interfaces: Generate the necessary interface layers between
+-  Fortran-C++ Interfaces: Generate the necessary interface layers between
    Fortran and C++ for easy function and subroutine conversion.
 
--  Code Generation and Update: Create new source files or modifying
-   existing from natural-language prompts.
+-  Code Generation and Update: Create new source files or modify
+   existing ones from natural-language prompts.
 
 *******************
  Statement of Need
@@ -73,7 +73,7 @@ necessary to leverage modern libraries and ensure performance
 portability across various heterogeneous high-performance computing
 (HPC) platforms. However, bulk translation of entire codebases often
 results in broken functionality and unmanageable complexity. Incremental
-translation, which involves creating Fortran-C layers, testing, and
+translation, which involves creating Fortran-C++ layers, testing, and
 iteratively converting the code, is a more practical approach.
 Code-Scribe supports this process by automating the creation of these
 interfaces and assisting with generative AI to improve efficiency and
@@ -86,7 +86,7 @@ modify existing files seamlessly.
  Installation
 **************
 
-At present we recommend installing Code-Scribe in an virtual
+At present, we recommend installing Code-Scribe in a virtual
 environment:
 
 .. code::
@@ -95,7 +95,7 @@ environment:
    source env/bin/activate
    pip install --upgrade pip
 
-And install Code-Scribe using the ``pip`` in editable mode:
+And install Code-Scribe using ``pip`` in editable mode:
 
 .. code::
 
@@ -108,8 +108,8 @@ source code and is an effective method for debugging.
  Usage
 *******
 
-You can use the `--help` options with every command to get better
-understanding of their functionality
+You can use the `--help` option with every command to get a better
+understanding of their functionality.
 
 .. code::
 
@@ -125,11 +125,11 @@ understanding of their functionality
    Commands:
      draft      Perform a draft conversion from Fortran to C++
      format     Format TOML seed prompt files
-     generate   Perform AI based code generation
+     generate   Perform AI-based code generation
      index      Index Fortran files along a project directory tree
      inspect    Perform AI code inspection on files
-     translate  Perform AI based code conversion of Fortran files
-     update     Perform AI based code update on files
+     translate  Perform AI-based code conversion of Fortran files
+     update     Perform AI-based code update on files
 
 Following is a brief overview of different commands:
 
@@ -169,8 +169,8 @@ Following is a brief overview of different commands:
 #. ``code-scribe translate <filelist> -m <model_name_or_path> -p
    <seed_prompt.toml>``: This command performs neural translation using
    generative AI. You can either download a model locally from
-   huggingface and provide it as an option to ``-m`` or you can simply
-   set ``-m openai-gpt-4o`` to use OpenAI API to perform code
+   Hugging Face and provide it as an option to ``-m`` or you can simply
+   set ``-m openai-gpt-4o`` to use the OpenAI API to perform code
    translation. Note that ``-m openai-gpt-4o`` requires the environment
    variable ``OPENAI_API_KEY`` to be set. The ``<prompt.toml>`` is a
    chat template that guides AI to perform code translation using the
@@ -196,31 +196,39 @@ Following is a brief overview of different commands:
       content = "<Append code from a source file>"
 
 #. ``code-scribe translate <filelist> -p <seed_prompt.toml>
-   --save-prompts``: This command allows generation of file specific
-   JSON chat template that one can copy/paste to chat interfaces like
+   --save-prompts``: This command allows the generation of file-specific
+   JSON chat templates that one can copy/paste to chat interfaces like
    that of ChatGPT to generate the source code. The JSON files are
    created from the seed prompt file and appended with source and draft
    code.
 
-#. ``code-scribe generate <seed_prompt> -m <model_name_or_path>``:
-   Generate new source files or applications based on specifications in
-   the prompt.
-
-#. ``code-scribe update <filelist> -p <seed_prompt.toml> -m
-   <model_name_or_path>``: Modify or extend existing source files using
-   seed prompt files.
-
-#. ``code-scribe update <filelist> -p "<natural-language-prompt>" -r
-   <referene_file> -m <model_name_or_path>``: This command allows for
-   updating files using natural language prompts and reference files.
+#. ``code-scribe inspect <filelist> -q <query_prompt> --save-prompts``:
+   Create a scribe.json that you can copy/paste to chat interfaces.
 
 #. ``code-scribe inspect <filelist> -q <query_prompt> -m
    <model_name_or_path>``: Perform a query on a set of source files
    using a single prompt. This is useful for navigating and
    understanding the source code.
 
-#. ``code-scribe inspect <filelist> -q <query_prompt> --save-prompts``:
-   Create a scribe.json that you can copy/paste to chat interfaces.
+#. ``code-scribe generate <seed_prompt> -m <model_name_or_path>``:
+   Generate new source files or applications based on specifications in
+   the prompt.
+
+#. ``code-scribe generate "<natural_language_prompt>" -m
+   <model_name_or_path> -r <reference_file1> -r
+   <reference_file2>``: Generate new source files or applications based
+   on specifications in the prompt. **This implementation offers great
+   flexibility in generating source code and specification files.**
+
+#. ``code-scribe update <filelist> -p <seed_prompt.toml> -m
+   <model_name_or_path>``: Modify or extend existing source files using
+   seed prompt files.
+
+#. ``code-scribe update <filelist> -p "<natural_language_prompt>" -r
+   <reference_file1> -r <reference_file2> -m <model_name_or_path>``:
+   This command allows for updating files using natural language prompts
+   and reference files. **This implementation offers great flexibility
+   in updating existing files.**
 
 ***************************
  Integrating LLM of Choice
@@ -243,7 +251,7 @@ Following is a brief overview of different commands:
 
       export OPENAI_API_KEY="your_openai_api_key_here"
 
-   And you have installed the OpenAI library
+   And you have installed the OpenAI library:
 
    .. code::
 
@@ -277,7 +285,7 @@ Following is a brief overview of different commands:
    ARGO models, such as `argo-gpt4o`. These models are accessible on the
    Argonne network by setting the environment variables `ARGO_USER` and
    `ARGO_API_ENDPOINT`. To use ARGO models, specify `-m argo-gpt4o` or
-   any other ARGO supported model of your choice when executing
+   any other ARGO-supported model of your choice when executing
    commands, as shown below:
 
    .. code::
@@ -335,7 +343,7 @@ and ensure that all interactions are logged for future reference.
 
 By following these steps, you can integrate any of the supported
 language models into Code-Scribe and use them for incremental
-translation of Fortran codebases to C++. Please the source file
+translation of Fortran codebases to C++. Please see the source file
 `lib/_llm.py` to view the source code.
 
 **********
