@@ -75,7 +75,7 @@ def generate(
 def update(
     filelist: List[Path],
     model: Union[Path, str],
-    seed_prompt: Union[Path, None],
+    seed_prompt: Union[Path, None] = None,
     query_prompt: str = "",
     reference_existing: List[Path] = [],
 ) -> None:
