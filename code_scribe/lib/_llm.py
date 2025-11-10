@@ -1,4 +1,4 @@
-# Prompt engineering for building diffusion stencils for constant and variable coefficient equation
+# Prompt engineering for building diffusion stencils for constant and variable coefficient equations
 
 # Import libraries
 import re
@@ -20,13 +20,12 @@ class OpenAIModel:
         self.model = model
 
     def chat(self, chat_template: List[Dict[str, str]]) -> str:
-        # We use the Chat Completion endpoint for chat like inputs
+        # We use the Chat Completion endpoint for chat-like inputs
         response = self.pipeline.chat.completions.create(
-            # model used here is ChatGPT
+            # Model used here is ChatGPT
             # You can use all these models for this endpoint:
             # gpt-4, gpt-4-0314, gpt-4-32k, gpt-4-32k-0314,
             # gpt-3.5-turbo, gpt-3.5-turbo-0301, gpt-4o
-            # model="gpt-3.5-turbo",
             model=self.model,
             messages=chat_template,
             max_tokens=self.max_tokens,
@@ -44,11 +43,11 @@ class ArgoModel:
 
         self.api_endpoint = os.getenv("ARGO_API_ENDPOINT")
         if not self.api_endpoint:
-            raise ValueError("ARGO_API_ENDPOINT env var is not set")
+            raise ValueError("ARGO_API_ENDPOINT environment variable is not set")
 
         self.user = os.getenv("ARGO_USER")
         if not self.user:
-            raise ValueError("ARGO_USER env var is not set")
+            raise ValueError("ARGO_USER environment variable is not set")
 
         self.model = model
 
@@ -58,7 +57,7 @@ class ArgoModel:
             system_prompt = chat_template[0]["content"]
             chat_template.pop(0)
         else:
-            system_prompt = "You are a large language model with the name Argo."
+            system_prompt = "You are a large language model named Argo."
 
         # Combine all role/content pairs into a single text block
         prompt_text = "\n\n".join(
@@ -93,8 +92,8 @@ class KimiModel:
     """
     Client for a locally hosted OpenAI-compatible Chat Completions API.
 
-    Expects the API key in env var: KIMI_API_KEY
-    Expects the API endpoint in env var: KIMI_API_ENDPOINT
+    Expects the API key in the environment variable: KIMI_API_KEY
+    Expects the API endpoint in the environment variable: KIMI_API_ENDPOINT
 
     Default model:
       moonshotai/Kimi-K2-Instruct
@@ -103,11 +102,11 @@ class KimiModel:
     def __init__(self) -> None:
         self.api_key = os.getenv("KIMI_API_KEY")
         if not self.api_key:
-            raise ValueError("KIMI_API_KEY env var is not set")
+            raise ValueError("KIMI_API_KEY environment variable is not set")
 
         self.endpoint = os.getenv("KIMI_API_ENDPOINT")
         if not self.endpoint:
-            raise ValueError("KIMI_API_ENDPOINT env var is not set")
+            raise ValueError("KIMI_API_ENDPOINT environment variable is not set")
 
         self.model = "moonshotai/Kimi-K2-Instruct"
         self.outputs = 1
@@ -168,7 +167,7 @@ class QwenModel:
     """
     Client for a locally hosted OpenAI-compatible Chat Completions API.
 
-    Expects the API key in env var: KIMI_API_KEY
+    Expects the API key in the environment variable: KIMI_API_KEY
     Default endpoint:
       http://llm.ai.r-ccs.riken.jp:11434/kimi/v1/chat/completions
     Default model:
@@ -178,11 +177,11 @@ class QwenModel:
     def __init__(self) -> None:
         self.api_key = os.getenv("KIMI_API_KEY")
         if not self.api_key:
-            raise ValueError("KIMI_API_KEY env var is not set")
+            raise ValueError("KIMI_API_KEY environment variable is not set")
 
         self.endpoint = os.getenv("KIMI_API_ENDPOINT")
         if not self.endpoint:
-            raise ValueError("KIMI_API_ENDPOINT env var is not set")
+            raise ValueError("KIMI_API_ENDPOINT environment variable is not set")
 
         self.model = "qwen3-coder:30b"
         self.outputs = 1
@@ -282,8 +281,8 @@ def _merge_system_with_user(
     chat_template: List[Dict[str, str]]
 ) -> List[Dict[str, str]]:
     """
-    Remove system role and prepend its contents to the first
-    user role
+    Remove the system role and prepend its contents to the first
+    user role.
     """
     if chat_template and chat_template[0]["role"] == "system":
         system_content = chat_template[0]["content"]
@@ -300,7 +299,7 @@ def _merge_system_with_user(
 
 def _set_neural_model(model: Union[Path, str]) -> object:
     """
-    Set neural model based on options
+    Set the neural model based on options.
     """
     if os.path.exists(model):
         neural_model = TFModel(model)
@@ -318,7 +317,7 @@ def _set_neural_model(model: Union[Path, str]) -> object:
         neural_model = QwenModel()
 
     else:
-        raise ValueError(f"{model} not available")
+        raise ValueError(f"{model} is not available")
 
     return neural_model
 
@@ -330,7 +329,7 @@ def prompt_translate(
     save_prompts: bool = False,
 ) -> None:
     """
-    perform translation using prompts and the supplied model.
+    Perform translation using prompts and the supplied model.
     """
     neural_model = None
 
@@ -389,10 +388,6 @@ def prompt_translate(
 
                 if save_prompts:
                     with open(promptfile, "w") as pdest:
-                        # for instance in chat_template:
-                        #    pdest.write("[[chat]]\n")
-                        #    pdest.write(f'role = "{instance["role"]}"\n')
-                        #    pdest.write(f'content = """\n{instance["content"]}"""\n\n')
                         json.dump(chat_template, pdest, indent=4)
                     print(f"Generated prompt file for LLM consumption {promptfile}")
 
@@ -445,7 +440,7 @@ def prompt_inspect(
     save_prompts: bool = False,
 ) -> None:
     """
-    Perform inspect on a list of files using a query prompt
+    Perform inspection on a list of files using a query prompt.
     """
     neural_model = None
 
@@ -460,7 +455,7 @@ def prompt_inspect(
 
     chat_template[-1]["content"] += (
         "You are a coding assistant.\n"
-        + "The user will give you source code from a set of files that\n"
+        + "The user will provide source code from a set of files that\n"
         + "belong to a scientific computing codebase. Understand the\n"
         + "source code and answer a query that follows.\n"
         + "Source code for each file will be separated using\n"
@@ -469,7 +464,7 @@ def prompt_inspect(
         + "provided within <index> ... </index>. This information will\n"
         + "contain an index of subroutines, functions, and modules contained\n"
         + "in each file. Note that you will find subroutines and functions\n"
-        + "repeat along nodes in the directory tree. This maybe due to a directory-based\n"
+        + "repeated along nodes in the directory tree. This may be due to a directory-based\n"
         + "inheritance design implemented by the project. If the index element is not\n"
         + "present, then you may ignore it. The query prompt will be provided at the end\n"
         + "using elements <query> ... </query>.\n\n"
@@ -518,7 +513,7 @@ def prompt_generate(
     reference_existing: List[Path] = [],
 ) -> None:
     """
-    Perform code understanding
+    Perform code generation based on the provided seed prompt.
     """
     neural_model = None
 
@@ -546,7 +541,7 @@ def prompt_generate(
         + "\n"
         + "Do not add any explanations or commentary outside of these tags.\n"
         + "Note that some of these files may be requested to be treated as read-only.\n"
-        + "Do not edit or generate files that are requested as ready only."
+        + "Do not edit or generate files that are requested as read-only."
     )
 
     if os.path.exists(seed_prompt):
@@ -558,8 +553,8 @@ def prompt_generate(
 
     if reference_existing:
         chat_template[-1]["content"] += (
-            "Use the content of following files as a reference to \n"
-            + "update the files above. Do not edit the files below, treat them as read-only\n\n"
+            "\n\nUse the content of the following files as a reference to \n"
+            + "update the files above. Do not edit the files below; treat them as read-only.\n\n"
         )
 
         for filename in reference_existing:
@@ -599,12 +594,13 @@ def prompt_generate(
 
 def prompt_update(
     filelist: List[Path],
-    seed_prompt: Union[Path, str],
+    seed_prompt: Path,
+    query_prompt: str,
     model: Union[Path, str] = None,
     reference_existing: List[Path] = [],
 ):
     """
-    Perform code understanding
+    Perform code updates based on the provided seed prompt and file list.
     """
     neural_model = None
 
@@ -632,20 +628,21 @@ def prompt_update(
         + "Do not edit files if they are not appended or requested as read-only."
     )
 
-    if os.path.exists(seed_prompt):
+    if seed_prompt:
         chat_template = system_template + lib.load_chat_template(seed_prompt)
-    elif isinstance(seed_prompt, str):
-        chat_template = system_template + [{"role": "user", "content": seed_prompt}]
     else:
-        raise ValueError(f"Cannot handle seed_prompt type: {type(seed_prompt)}")
+        chat_template = system_template + [{"role": "user", "content": ""}]
+
+    if query_prompt:
+        chat_template[-1]["content"] += query_prompt
 
     if set(filelist) & set(reference_existing):
         raise ValueError("Reference and target files should be mutually exclusive")
 
     if filelist:
         chat_template[-1]["content"] += (
-            "Update the content of following files based on\n"
-            + "the instructions. Enclose output of each file in their\n"
+            "\n\nUpdate the content of the following files based on\n"
+            + "the instructions. Enclose the output of each file in their\n"
             + "respective XML elements. Only update the following files.\n\n"
         )
 
@@ -663,8 +660,8 @@ def prompt_update(
 
     if reference_existing:
         chat_template[-1]["content"] += (
-            "Use the content of following files as a reference to \n"
-            + "update the files above. Do not edit the files below, treat them as read-only\n\n"
+            "Use the content of the following files as a reference to \n"
+            + "update the files above. Do not edit the files below; treat them as read-only.\n\n"
         )
 
         for filename in reference_existing:

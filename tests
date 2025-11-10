@@ -24,10 +24,10 @@ code-scribe generate \
 
 code-scribe generate complicated.toml
 
-code-scribe update generated-src/main.cpp generated-src/Makefile -p prompts/code_update.tom
+code-scribe update generated-src/main.cpp generated-src/Makefile -p prompts/code_update.toml
 
 code-scribe update src/main.cpp src/Solver.F90 src/Initialize.F90 \
-	-p "Write a detailed documentation in the comment section of these files"
+	-q "Write a detailed documentation in the comment section of these files"
 
 cat src/main.cpp src/Solver.F90 src/Initialize.F90
 git checkout src/main.cpp src/Solver.F90 src/Initialize.F90

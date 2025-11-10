@@ -100,7 +100,7 @@ def translate(
 
 
 @code_scribe.command(name="generate")
-@click.argument("seed-prompt", required=True)
+@click.argument("seed-query-prompt", required=True)
 @click.option(
     "--model",
     "-m",
@@ -124,7 +124,7 @@ def translate(
     help="List of reference files",
 )
 def generate(
-    seed_prompt: Union[Path, str],
+    seed_query_prompt: Union[Path, str],
     model: Union[Path, str],
     save_prompts: bool,
     reference_existing: List[Path],
@@ -147,7 +147,7 @@ def generate(
             )
 
     api.generate(
-        seed_prompt,
+        seed_query_prompt,
         model,
         save_prompts,
         [Path(file) for file in reference_existing],
@@ -159,8 +159,12 @@ def generate(
 @click.option(
     "--seed-prompt",
     "-p",
-    required=True,
-    help="TOML seed file containt prompts",
+    help="TOML seed file containing prompts",
+)
+@click.option(
+    "--query-prompt",
+    "-q",
+    help="Natural language prompt",
 )
 @click.option(
     "--model",
@@ -178,8 +182,9 @@ def generate(
 )
 def update(
     filelist: List[Path],
-    seed_prompt: Union[Path, str],
     model: [Path, str],
+    seed_prompt: Path,
+    query_prompt: str,
     reference_existing: List[Path],
 ) -> None:
     """
@@ -192,10 +197,16 @@ def update(
     based on specifications given in the prompt/
     \b
     """
+    if (not seed_prompt) and (not query_prompt):
+        raise click.UsageError(
+            "Please provide either the '--seed-prompt/-p' or '--query-prompt/-q'"
+        )
+
     api.update(
         [Path(file) for file in filelist],
-        seed_prompt,
         model,
+        seed_prompt,
+        query_prompt,
         [Path(file) for file in reference_existing],
     )
 

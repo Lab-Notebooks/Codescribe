@@ -56,7 +56,7 @@ def inspect(
 
 
 def generate(
-    seed_prompt: Union[Path, str],
+    seed_query_prompt: Union[Path, str],
     model: Union[Path, str],
     save_prompts: bool = False,
     reference_existing: List[Path] = [],
@@ -65,7 +65,7 @@ def generate(
     API command for generating files
     """
     lib.prompt_generate(
-        seed_prompt,
+        seed_query_prompt,
         model=model,
         save_prompts=save_prompts,
         reference_existing=reference_existing,
@@ -74,16 +74,21 @@ def generate(
 
 def update(
     filelist: List[Path],
-    seed_prompt: Union[Path, str],
     model: Union[Path, str],
+    seed_prompt: Union[Path, None],
+    query_prompt: str = "",
     reference_existing: List[Path] = [],
 ) -> None:
     """
     API command for updating files
     """
+    if (not seed_prompt) and (not query_prompt):
+        raise ValueError("Please provide either the 'seed_prompt' or 'query_prompt'")
+
     lib.prompt_update(
         filelist,
         seed_prompt,
+        query_prompt,
         model=model,
         reference_existing=reference_existing,
     )
