@@ -182,9 +182,9 @@ def generate(
 )
 def update(
     filelist: List[Path],
-    model: [Path, str],
     seed_prompt: Path,
     query_prompt: str,
+    model: [Path, str],
     reference_existing: List[Path],
 ) -> None:
     """
