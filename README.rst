@@ -224,7 +224,7 @@ Following is a brief overview of different commands:
    <model_name_or_path>``: Modify or extend existing source files using
    seed prompt files.
 
-#. ``code-scribe update <filelist> -p "<natural_language_prompt>" -r
+#. ``code-scribe update <filelist> -q "<natural_language_prompt>" -r
    <reference_file1> -r <reference_file2> -m <model_name_or_path>``:
    This command allows for updating files using natural language prompts
    and reference files. **This implementation offers great flexibility
