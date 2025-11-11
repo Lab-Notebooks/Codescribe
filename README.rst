@@ -18,10 +18,10 @@ generating corresponding C++ source files and creating Fortran-C++
 interfaces, simplifying the integration of Fortran and C++. The tool
 allows users to interface with large language models (LLMs) through the
 API endpoints and locally through the Transformers library, and enables
-the creation of custom prompts tailored to the specific needs of the source
-code. Code-Scribe empowers research software engineers by complementing
-existing tools like OpenAI Codex and addressing the niche requirements
-of scientific software development.
+the creation of custom prompts tailored to the specific needs of the
+source code. Code-Scribe empowers research software engineers by
+complementing existing tools like OpenAI Codex and addressing the niche
+requirements of scientific software development.
 
 ***********
  Resources
@@ -58,8 +58,8 @@ of scientific software development.
 
    |fig2|
 
--  Fortran-C++ Interfaces: Generate the necessary interface layers between
-   Fortran and C++ for easy function and subroutine conversion.
+-  Fortran-C++ Interfaces: Generate the necessary interface layers
+   between Fortran and C++ for easy function and subroutine conversion.
 
 -  Code Generation and Update: Create new source files or modify
    existing ones from natural-language prompts.
@@ -89,7 +89,7 @@ modify existing files seamlessly.
 At present, we recommend installing Code-Scribe in a virtual
 environment:
 
-.. code::
+.. code:: bash
 
    python3 -m venv env
    source env/bin/activate
@@ -97,7 +97,7 @@ environment:
 
 And install Code-Scribe using ``pip`` in editable mode:
 
-.. code::
+.. code:: bash
 
    pip install -e .
 
@@ -111,7 +111,7 @@ source code and is an effective method for debugging.
 You can use the `--help` option with every command to get a better
 understanding of their functionality.
 
-.. code::
+.. code:: bash
 
    ▶ code-scribe --help
    Usage: code-scribe [OPTIONS] COMMAND [ARGS]...
@@ -166,9 +166,10 @@ Following is a brief overview of different commands:
    saved with a ``.scribe`` extension and include prompts tailored to
    each statement in the original source code.
 
-#. ``code-scribe translate <filelist> -m <model_name_or_path> -p <seed_prompt.toml>``:
-   This command performs neural translation using generative AI. You can either download a model 
-   locally from HuggingFace and provide it as an option to ``-m`` or you can simply
+#. ``code-scribe translate <filelist> -m <model_name_or_path> -p
+   <seed_prompt.toml>``: This command performs neural translation using
+   generative AI. You can either download a model locally from
+   HuggingFace and provide it as an option to ``-m`` or you can simply
    set ``-m openai-gpt-4o`` to use the OpenAI API to perform code
    translation. Note that ``-m openai-gpt-4o`` requires the environment
    variable ``OPENAI_API_KEY`` to be set. The ``<prompt.toml>`` is a
@@ -194,8 +195,8 @@ Following is a brief overview of different commands:
       [[chat.user]]
       content = "<Append code from a source file>"
 
-#. ``code-scribe translate <filelist> -p <seed_prompt.toml> --save-prompts``: 
-   This command allows the generation of file-specific
+#. ``code-scribe translate <filelist> -p <seed_prompt.toml>
+   --save-prompts``: This command allows the generation of file-specific
    JSON chat templates that one can copy/paste to chat interfaces like
    that of ChatGPT to generate the source code. The JSON files are
    created from the seed prompt file and appended with source and draft
@@ -204,8 +205,8 @@ Following is a brief overview of different commands:
 #. ``code-scribe inspect <filelist> -q <query_prompt> --save-prompts``:
    Create a scribe.json that you can copy/paste to chat interfaces.
 
-#. ``code-scribe inspect <filelist> -q <query_prompt> -m <model_name_or_path>``: 
-   Perform a query on a set of source files
+#. ``code-scribe inspect <filelist> -q <query_prompt> -m
+   <model_name_or_path>``: Perform a query on a set of source files
    using a single prompt. This is useful for navigating and
    understanding the source code.
 
@@ -213,18 +214,21 @@ Following is a brief overview of different commands:
    Generate new source files or applications based on specifications in
    the prompt.
 
-#. ``code-scribe generate "<natural_language_prompt>" -m <model_name_or_path> -r <reference_file1> -r <reference_file2>``:
-   Generate new source files or applications based
-   on specifications in the prompt. **This implementation offers great
-   flexibility in generating source code and specification files.**
+#. ``code-scribe generate "<natural_language_prompt>" -m
+   <model_name_or_path> -r <reference_file1> -r <reference_file2>``:
+   Generate new source files or applications based on specifications in
+   the prompt. This implementation offers great flexibility in
+   generating source code and specification files.
 
-#. ``code-scribe update <filelist> -p <seed_prompt.toml> -m <model_name_or_path>``:
-   Modify or extend existing source files using seed prompt files.
+#. ``code-scribe update <filelist> -p <seed_prompt.toml> -m
+   <model_name_or_path>``: Modify or extend existing source files using
+   seed prompt files.
 
-#. ``code-scribe update <filelist> -q "<natural_language_prompt>" -r <reference_file1> -r <reference_file2> -m <model_name_or_path>``:
+#. ``code-scribe update <filelist> -q "<natural_language_prompt>" -r
+   <reference_file1> -r <reference_file2> -m <model_name_or_path>``:
    This command allows for updating files using natural language prompts
-   and reference files. **This implementation offers great flexibility
-   in updating existing files.**
+   and reference files. This implementation offers great flexibility in
+   updating existing files.
 
 ***************************
  Integrating LLM of Choice
@@ -235,7 +239,7 @@ Following is a brief overview of different commands:
    models, specify `-m openai-gpt-4o` when executing the commands, as
    shown below:
 
-   .. code::
+   .. code:: bash
 
       ▶ code-scribe translate <filelist> -m openai-gpt-4o -p <seed_prompt.toml>
 
@@ -243,13 +247,13 @@ Following is a brief overview of different commands:
    your OpenAI API key. You can set it by running the following command
    in your terminal:
 
-   .. code::
+   .. code:: bash
 
       export OPENAI_API_KEY="your_openai_api_key_here"
 
    And you have installed the OpenAI library:
 
-   .. code::
+   .. code:: bash
 
       pip install openai
 
@@ -262,14 +266,14 @@ Following is a brief overview of different commands:
    To use a Hugging Face model, first install the necessary libraries if
    not already installed:
 
-   .. code::
+   .. code:: bash
 
       pip install transformers torch
 
    Then specify the path to the pre-trained model using the `-m` flag in
    the command. For example, to use a GPT-2 model:
 
-   .. code::
+   .. code:: bash
 
       ▶ code-scribe translate <filelist> -m <path_to_model> -p <seed_prompt.toml>
 
@@ -284,14 +288,14 @@ Following is a brief overview of different commands:
    any other ARGO-supported model of your choice when executing
    commands, as shown below:
 
-   .. code::
+   .. code:: bash
 
       ▶ code-scribe translate <filelist> -m argo-gpt4o -p <seed_prompt.toml>
 
    Ensure that the environment variables `ARGO_USER` and
    `ARGO_API_ENDPOINT` are set correctly. For example:
 
-   .. code::
+   .. code:: bash
 
       export ARGO_USER="your_argo_username"
       export ARGO_API_ENDPOINT="argo_api_endpoint"
@@ -305,7 +309,7 @@ Following is a brief overview of different commands:
    a JSON format. This is useful if you want to copy and paste the
    prompts into an external tool, like ChatGPT, for further refinement.
 
-   .. code::
+   .. code:: bash
 
       ▶ code-scribe translate <filelist> -p <seed_prompt.toml> --save-prompts
 
@@ -319,7 +323,7 @@ To streamline the usage of Code-Scribe and avoid repeatedly specifying
 the `-m` flag for model selection, you can set the environment variable
 `CODESCRIBE_MODEL` to the desired model name or path. For example:
 
-.. code::
+.. code:: bash
 
    export CODESCRIBE_MODEL="argo-gpt4o"
 
@@ -330,7 +334,7 @@ Additionally, to archive interactions with LLMs for downstream analysis
 or debugging, you can set the `CODESCRIBE_ARCHIVE` environment variable
 to a directory path where the interactions will be stored:
 
-.. code::
+.. code:: bash
 
    export CODESCRIBE_ARCHIVE="/path/to/archive/directory"
 
@@ -346,7 +350,7 @@ translation of Fortran codebases to C++. Please see the source file
  Citation
 **********
 
-.. code::
+.. code:: latex
 
    @software{akash_dhruv_2024_13879406,
    author       = {Akash Dhruv},
@@ -359,7 +363,7 @@ translation of Fortran codebases to C++. Please see the source file
    url          = {https://github.com/akashdhruv/CodeScribe}
    }
 
-.. code::
+.. code:: latex
 
    @conference{dhruv_dubey_2025_3732775,
    author       = {Akash Dhruv and Anshu Dubey},
