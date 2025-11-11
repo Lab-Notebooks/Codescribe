@@ -166,10 +166,9 @@ Following is a brief overview of different commands:
    saved with a ``.scribe`` extension and include prompts tailored to
    each statement in the original source code.
 
-#. ``code-scribe translate <filelist> -m <model_name_or_path> -p
-   <seed_prompt.toml>``: This command performs neural translation using
-   generative AI. You can either download a model locally from
-   Hugging Face and provide it as an option to ``-m`` or you can simply
+#. ``code-scribe translate <filelist> -m <model_name_or_path> -p <seed_prompt.toml>``:
+   This command performs neural translation using generative AI. You can either download a model 
+   locally from HuggingFace and provide it as an option to ``-m`` or you can simply
    set ``-m openai-gpt-4o`` to use the OpenAI API to perform code
    translation. Note that ``-m openai-gpt-4o`` requires the environment
    variable ``OPENAI_API_KEY`` to be set. The ``<prompt.toml>`` is a
@@ -195,8 +194,8 @@ Following is a brief overview of different commands:
       [[chat.user]]
       content = "<Append code from a source file>"
 
-#. ``code-scribe translate <filelist> -p <seed_prompt.toml>
-   --save-prompts``: This command allows the generation of file-specific
+#. ``code-scribe translate <filelist> -p <seed_prompt.toml> --save-prompts``: 
+   This command allows the generation of file-specific
    JSON chat templates that one can copy/paste to chat interfaces like
    that of ChatGPT to generate the source code. The JSON files are
    created from the seed prompt file and appended with source and draft
@@ -205,8 +204,8 @@ Following is a brief overview of different commands:
 #. ``code-scribe inspect <filelist> -q <query_prompt> --save-prompts``:
    Create a scribe.json that you can copy/paste to chat interfaces.
 
-#. ``code-scribe inspect <filelist> -q <query_prompt> -m
-   <model_name_or_path>``: Perform a query on a set of source files
+#. ``code-scribe inspect <filelist> -q <query_prompt> -m <model_name_or_path>``: 
+   Perform a query on a set of source files
    using a single prompt. This is useful for navigating and
    understanding the source code.
 
@@ -214,18 +213,15 @@ Following is a brief overview of different commands:
    Generate new source files or applications based on specifications in
    the prompt.
 
-#. ``code-scribe generate "<natural_language_prompt>" -m
-   <model_name_or_path> -r <reference_file1> -r
-   <reference_file2>``: Generate new source files or applications based
+#. ``code-scribe generate "<natural_language_prompt>" -m <model_name_or_path> -r <reference_file1> -r <reference_file2>``:
+   Generate new source files or applications based
    on specifications in the prompt. **This implementation offers great
    flexibility in generating source code and specification files.**
 
-#. ``code-scribe update <filelist> -p <seed_prompt.toml> -m
-   <model_name_or_path>``: Modify or extend existing source files using
-   seed prompt files.
+#. ``code-scribe update <filelist> -p <seed_prompt.toml> -m <model_name_or_path>``:
+   Modify or extend existing source files using seed prompt files.
 
-#. ``code-scribe update <filelist> -q "<natural_language_prompt>" -r
-   <reference_file1> -r <reference_file2> -m <model_name_or_path>``:
+#. ``code-scribe update <filelist> -q "<natural_language_prompt>" -r <reference_file1> -r <reference_file2> -m <model_name_or_path>``:
    This command allows for updating files using natural language prompts
    and reference files. **This implementation offers great flexibility
    in updating existing files.**
