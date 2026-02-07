@@ -310,10 +310,10 @@ def create_scribe_yaml(root_directory: Path) -> None:
                 scribe_data["files"][filename] = fortran_info
 
         # Only write to scribe.yaml if there are Fortran files in the directory
-        if scribe_data["files"]:
-            yaml_path = os.path.join(dirpath, "scribe.yaml")
-            with open(yaml_path, "w") as yaml_file:
-                yaml.dump(scribe_data, yaml_file, default_flow_style=False)
+        #if scribe_data["files"]:
+        yaml_path = os.path.join(dirpath, "scribe.yaml")
+        with open(yaml_path, "w") as yaml_file:
+            yaml.dump(scribe_data, yaml_file, default_flow_style=False)
 
 
 def load_scribe_yaml(file_path: Path) -> Dict[str, str]:

@@ -10,6 +10,33 @@ from alive_progress import alive_bar
 
 from code_scribe import lib
 
+class ALCFModel:
+    def __init__(self, model: str) -> None:
+        openai = importlib.import_module("openai")
+ 
+        self.api_endpoint = os.getenv("ALCF_INFERENCE_ENDPOINT")
+        if not self.api_endpoint:
+            raise ValueError("ALCF_INFERENCE_ENDPOINT environment variable is not set")
+
+        self.apikey = os.getenv("ALCF_INFERENCE_APIKEY")
+        if not self.apikey:
+            raise ValueError("ARGO_INFERENCE_APIKEY environment variable is not set")
+
+        self.model = model
+        self.pipeline = openai.OpenAI(api_key=self.apikey, base_url=self.api_endpoint)
+        self.outputs = 1
+        self.max_tokens = 4096
+ 
+    def chat(self, chat_template: List[Dict[str, str]]) -> str:
+        response = self.pipeline.chat.completions.create(
+            model=self.model,
+            messages=chat_template,
+            max_tokens=self.max_tokens,
+            n=self.outputs,
+        )
+
+        return response.choices[0].message.content
+
 
 class OpenAIModel:
     def __init__(self, model: str) -> None:
@@ -309,6 +336,9 @@ def _set_neural_model(model: Union[Path, str]) -> object:
 
     elif model.lower().startswith("argo-"):
         neural_model = ArgoModel(model.lower().strip("argo")[1:])
+
+    elif model.lower().startswith("alcf-"):
+        neural_model = ALCFModel(model.lower().strip("alcf")[1:])
 
     elif model.lower() == "kimi":
         neural_model = KimiModel()
