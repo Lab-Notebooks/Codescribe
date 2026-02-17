@@ -10,23 +10,30 @@ from alive_progress import alive_bar
 
 from code_scribe import lib
 
-class ALCFModel:
-    def __init__(self, model: str) -> None:
+
+class OpencodeModel:
+    def __init__(self) -> None:
         openai = importlib.import_module("openai")
- 
-        self.api_endpoint = os.getenv("ALCF_INFERENCE_ENDPOINT")
-        if not self.api_endpoint:
-            raise ValueError("ALCF_INFERENCE_ENDPOINT environment variable is not set")
 
-        self.apikey = os.getenv("ALCF_INFERENCE_APIKEY")
-        if not self.apikey:
-            raise ValueError("ARGO_INFERENCE_APIKEY environment variable is not set")
+        self.baseurl = os.getenv("OPENCODE_CODESCRIBE_BASEURL")
+        self.provider = os.getenv("OPENCODE_CODESCRIBE_PROVIDER")
+        self.model = os.getenv("OPENCODE_CODESCRIBE_MODEL")
 
-        self.model = model
-        self.pipeline = openai.OpenAI(api_key=self.apikey, base_url=self.api_endpoint)
+        print(self.baseurl, self.provider, self.model)
+
+        if "alcf" in self.provider:
+            self.apikey = os.getenv("ALCF_INFERENCE_APIKEY")
+            if not self.apikey:
+                raise ValueError(
+                    "ARGO_INFERENCE_APIKEY environment variable is not set"
+                )
+        else:
+            self.apikey = "null"
+
+        self.pipeline = openai.OpenAI(api_key=self.apikey, base_url=self.baseurl)
         self.outputs = 1
         self.max_tokens = 4096
- 
+
     def chat(self, chat_template: List[Dict[str, str]]) -> str:
         response = self.pipeline.chat.completions.create(
             model=self.model,
@@ -337,8 +344,8 @@ def _set_neural_model(model: Union[Path, str]) -> object:
     elif model.lower().startswith("argo-"):
         neural_model = ArgoModel(model.lower().strip("argo")[1:])
 
-    elif model.lower().startswith("alcf-"):
-        neural_model = ALCFModel(model.lower().strip("alcf")[1:])
+    elif model.lower() == "opencode-env":
+        neural_model = OpencodeModel()
 
     elif model.lower() == "kimi":
         neural_model = KimiModel()
