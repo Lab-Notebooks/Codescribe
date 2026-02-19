@@ -33,23 +33,49 @@ Before entering the workflow, determine user intent:
    - If user already said "translate": skip scenario clarification and ask for missing translate inputs (Fortran file(s) + prompt TOML).
    - If user already said "generate": skip scenario clarification and ask for missing generate inputs (prompt TOML/string + optional refs).
 2. Collect required inputs for that scenario. List files in directories and sub-directories if the user asks.
-3. Validate inputs using `csb_skill_validate` (includes glob expansion and path checks).
-4. If validation succeeds (`ok:true`), produce a bundle using `csb_skill_bundle`.
-5. Output the bundle and hand off to `codescribe_executor`.
-6. Include this instruction: executor must run `csb_skill_setenv` before executing any bundle command.
+3. Resolve environment (provider/model) deterministically:
+   - Keep an in-session cached selection: `selectedProvider`, `selectedModel`.
+   - If the user explicitly asks to switch provider/model OR cache is empty: run `csb_skill_setenv` interactively.
+   - Otherwise re-use the cached selection and do not re-ask.
+4. Validate inputs using `csb_skill_validate` (includes glob expansion and path checks).
+5. If validation succeeds (`ok:true`), produce a bundle using `csb_skill_bundle`.
+6. Output the bundle and hand off to `codescribe_executor`. Do not run `csb_tool_codescribe` yourself
 
 # Output format
-Only output a single Executor Command Bundle after successful validation (`ok:true`). Otherwise respond normally (no bundle).
+Output a single Executor Command Bundle after successful validation (`ok:true`).
+Otherwise respond normally (no bundle).
 
 Bundle format:
 ```text
 ### Executor Command Bundle
 Scenario: <translate|generate>
 
-1. (command="<cmd>", args=[...])
-2. (command="<cmd>", args=[...])
+Env:
+  provider: <provider-id>
+  model: <model-id>
+
+FileList:
+- <fortran-file-1>
+- <fortran-file-2>
+
+Commands:
+1) codescribe(command="<cmd>", args=[...])
+2) codescribe(command="<cmd>", args=["@FileList", ...])
 ...
 ```
+Maksure the file names are in separate lines a shown in the example
+
+# Translate bundle rules
+- Translate bundles are deterministic and always include the command sequence: `index`, `draft`, `translate`.
+- `draft` and `translate` both take the same Fortran inputs.
+- Do not repeat file paths in the Commands section. Use `@FileList` macro in `args`.
+
+# Generate bundle rules
+- Generate bundles contain only `generate`.
+
+# Macro contract
+- `@FileList` is a macro placeholder understood by `codescribe_executor`.
+- It expands to the bullet list under `FileList:` when executing tool calls.
 
 # Constraints
 Ask exactly one clarifying question at a time.

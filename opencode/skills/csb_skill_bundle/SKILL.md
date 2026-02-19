@@ -17,8 +17,7 @@ Input must be a successful validation result containing:
 
 ### Step 2: Compute Root Directory (translate only)
 For `translate` scenario:
-- Compute `root_dir` as the lowest common ancestor directory of all `fortran_files`.
-- If only one file, use its parent directory.
+- Compute `root_dir` as the current working directory.
 
 ### Step 3: Emit Executor Command Bundle
 For `translate`:
