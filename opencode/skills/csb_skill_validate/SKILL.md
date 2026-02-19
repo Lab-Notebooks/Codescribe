@@ -30,23 +30,28 @@ message: "Only `generate` and `translate` are supported."
 - Optional `-r` refs: each must be explicit (no globs), exist, be a file
 
 **For `translate`:**
-- Seed prompt TOML: explicit (no globs), ends `.toml`, exists, is a file
+- Root directory (`root_dir`): required, must exist, must be a directory
+- Seed prompt TOML: explicit (no globs), ends `.toml`, exists, is a file (no constraint on location—may be inside or outside `root_dir`)
 - Fortran targets: globs allowed
 - Expand globs to concrete file list (hidden files excluded)
 - Expanded list must be non-empty
 - Each file must exist, be a file, have extension in:
   `.f .F .f90 .F90 .f95 .F95 .f03 .F03 .f08 .F08 .for .FOR`
+- Each Fortran file must be under `root_dir`
 - MUST reject `-r` refs for translate
+- Convert all `fortran_files` to paths relative to `root_dir`
+- Convert `prompt_toml` to absolute path.
 
 ### Step 3: Return Result
 **On success:**
 ```
 ok: true
 scenario: <generate|translate>
-prompt_toml: <path>          # if applicable
+root_dir: <path>              # translate only (absolute path)
+prompt_toml: <path>           # as-is (absolute or relative, no location constraint)
 prompt_string: <string>       # if applicable
 refs: [<paths>]               # if applicable
-fortran_files: [<paths>]      # concrete list for translate
+fortran_files: [<paths>]      # concrete list for translate (relative to root_dir)
 ```
 
 **On failure:**
@@ -63,3 +68,10 @@ invalid: [<fields>]
 - Never re-ask: if the answer doesn't resolve the issue, explain what went wrong and wait.
 - Maximum 2 attempts: after 2 failed resolutions, STOP and summarize what the user needs to provide.
 - TOML paths MUST NOT contain glob metacharacters (`* ? [ ] { }`).
+- For translate: if any Fortran file is not under `root_dir`, fail with:
+  ```
+  ok: false
+  error_code: FILE_OUTSIDE_ROOT
+  message: "<file> is not under root_dir <root_dir>"
+  ```
+  (This constraint does NOT apply to `prompt_toml`—it may be located anywhere.)
