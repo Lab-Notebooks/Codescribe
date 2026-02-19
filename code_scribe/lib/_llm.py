@@ -11,21 +11,31 @@ from alive_progress import alive_bar
 from code_scribe import lib
 
 
-class OpencodeModel:
-    def __init__(self) -> None:
+class OpenAICompModel:
+    def __init__(self, model: str) -> None:
         openai = importlib.import_module("openai")
 
-        self.baseurl = os.getenv("OPENCODE_CODESCRIBE_BASEURL")
-        self.provider = os.getenv("OPENCODE_CODESCRIBE_PROVIDER")
-        self.model = os.getenv("OPENCODE_CODESCRIBE_MODEL")
+        self.baseurl = os.getenv("OPENAI_COMP_BASEURL")
+        if not self.baseurl:
+            raise ValueError("OPENAI_COMP_BASEURL environment variable is not set")
 
-        print(self.baseurl, self.provider, self.model)
+        self.provider = os.getenv("OPENAI_COMP_PROVIDER")
+        if not self.provider:
+            raise ValueError("OPENAI_COMP_PROVIDER environment variable is not set")
 
-        if "alcf" in self.provider:
+        if model.lower() == "env":
+            self.model = os.getenv("OPENAI_COMP_MODEL")
+        else:
+            self.model = model
+
+        if os.getenv("OPENAI_COMP_APIKEY"):
+            self.apikey = os.getenv("OPENAI_COMP_APIKEY")
+
+        elif "alcf" in self.provider:
             self.apikey = os.getenv("ALCF_INFERENCE_APIKEY")
             if not self.apikey:
                 raise ValueError(
-                    "ARGO_INFERENCE_APIKEY environment variable is not set"
+                    "ALCF_INFERENCE_APIKEY environment variable is not set"
                 )
         else:
             self.apikey = "null"
@@ -338,14 +348,14 @@ def _set_neural_model(model: Union[Path, str]) -> object:
     if os.path.exists(model):
         neural_model = TFModel(model)
 
+    elif model.lower().startswith("oaic-"):
+        neural_model = OpenAICompModel(model.lower().strip("oaic")[1:])
+
     elif model.lower().startswith("openai-"):
         neural_model = OpenAIModel(model.lower().strip("openai")[1:])
 
     elif model.lower().startswith("argo-"):
         neural_model = ArgoModel(model.lower().strip("argo")[1:])
-
-    elif model.lower() == "opencode-env":
-        neural_model = OpencodeModel()
 
     elif model.lower() == "kimi":
         neural_model = KimiModel()
