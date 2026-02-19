@@ -98,10 +98,10 @@ export const ProviderModelPlugin: Plugin = async ({ client }) => {
  * Commands:
  *   - index <directory>: Index Fortran files, create scribe.yaml
  *   - draft <file>: Generate draft .scribe file with C++ annotations
- *   - translate <file> -p <prompt.toml>: Translate Fortran to C++ (always uses -m opencode-env)
- *   - inspect <files> -q "<query>": Query/analyze source files (always uses -m opencode-env)
- *   - update <files> -p <prompt.toml> -q "<query>" [-r <ref>...]: Update existing files (always uses -m opencode-env)
- *   - generate <prompt> [-r <ref>...]: Generate new code (always uses -m opencode-env)
+ *   - translate <file> -p <prompt.toml>: Translate Fortran to C++ (always uses -m oaic-env)
+ *   - inspect <files> -q "<query>": Query/analyze source files (always uses -m oaic-env)
+ *   - update <files> -p <prompt.toml> -q "<query>" [-r <ref>...]: Update existing files (always uses -m oaic-env)
+ *   - generate <prompt> [-r <ref>...]: Generate new code (always uses -m oaic-env)
  *   - format <files>: Format TOML prompt files
  *
  * Command-specific rules:
@@ -124,13 +124,13 @@ Optionally sets OPENCODE_CODESCRIBE_* env vars (model/provider/baseURL) before r
 Commands:
   - index <directory>: Index Fortran project, creates scribe.yaml
   - draft <file>: Generate draft .scribe file (single Fortran file)
-  - translate <file> -p <prompt.toml>: Translate Fortran to C++ (Fortran files only, no -r; always uses -m opencode-env)
-  - inspect <files> -q "<query>": Analyze source files (always uses -m opencode-env)
-  - update <files> [-p <prompt.toml>] [-q "<query>"] [-r <ref>...]: Modify existing files (requires -p and/or -q; always uses -m opencode-env)
-  - generate <prompt> [-r <ref>...]: Generate new code (prompt is TOML path or string; always uses -m opencode-env)
+  - translate <file> -p <prompt.toml>: Translate Fortran to C++ (Fortran files only, no -r; always uses -m oaic-env)
+  - inspect <files> -q "<query>": Analyze source files (always uses -m oaic-env)
+  - update <files> [-p <prompt.toml>] [-q "<query>"] [-r <ref>...]: Modify existing files (requires -p and/or -q; always uses -m oaic-env)
+  - generate <prompt> [-r <ref>...]: Generate new code (prompt is TOML path or string; always uses -m oaic-env)
   - format <files>: Format TOML prompt files
 
-Note: The -m/--model CLI option is always set to "opencode-env" for commands that require it. Any user-provided -m/--model is ignored.
+Note: The -m/--model CLI option is always set to "oaic-env" for commands that require it. Any user-provided -m/--model is ignored.
 
 Example: codescribe translate src/Solver.F90 -p prompts/code_translation.toml`,
 
@@ -158,7 +158,7 @@ Example: codescribe translate src/Solver.F90 -p prompts/code_translation.toml`,
           const needsEnv = requiresProviderModel.has(command)
 
           // Enforced CLI model for commands that need it
-          const FORCED_CLI_MODEL = "opencode-env"
+          const FORCED_CLI_MODEL = "oaic-env"
 
           // Helper to strip any user-supplied -m/--model from args
           function stripModelArgs(argv: string[]): string[] {
@@ -251,12 +251,12 @@ Example: codescribe translate src/Solver.F90 -p prompts/code_translation.toml`,
             }
 
             // Set environment variables for the current Node session
-            process.env.OPENCODE_CODESCRIBE_MODEL = resolvedModel
-            process.env.OPENCODE_CODESCRIBE_PROVIDER = resolvedProvider
+            process.env.OPENAI_COMP_MODEL = resolvedModel
+            process.env.OPENAI_COMP_PROVIDER = resolvedProvider
             if (baseURL) {
-              process.env.OPENCODE_CODESCRIBE_BASEURL = baseURL
+              process.env.OPENAI_COMP_BASEURL = baseURL
             } else {
-              delete process.env.OPENCODE_CODESCRIBE_BASEURL
+              delete process.env.OPENAI_COMP_BASEURL
             }
             envSet = true
           }
@@ -264,7 +264,7 @@ Example: codescribe translate src/Solver.F90 -p prompts/code_translation.toml`,
           // Run the CLI
           const startTime = Date.now()
 
-          // Normalize args: strip any user-provided -m/--model and enforce -m opencode-env
+          // Normalize args: strip any user-provided -m/--model and enforce -m oaic-env
           const requiresCliModel = requiresProviderModel.has(command)
           const normalizedArgs = requiresCliModel ? stripModelArgs(args) : args
           const cliArgs = requiresCliModel

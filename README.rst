@@ -304,6 +304,45 @@ Following is a brief overview of different commands:
    ARGO models are recommended for users with access to the Argonne
    network.
 
+#. **OpenAI-Compatible Endpoints (Ollama, etc.)**: Code-Scribe supports
+   any OpenAI-compatible API endpoint, making it easy to use on-premises
+   models such as Ollama. To use an OpenAI-compatible endpoint, specify
+   `-m oaic-<model>` where `<model>` is the model name served by your
+   endpoint. For example, to use a locally running Ollama instance with
+   `llama3.1`:
+
+   .. code:: bash
+
+      ▶ code-scribe translate <filelist> -m oaic-llama3.1 -p <seed_prompt.toml>
+
+   Before running the command, set the following environment variables:
+
+   .. code:: bash
+
+      # Required: Base URL of the OpenAI-compatible API (must include /v1)
+      export OPENAI_COMP_BASEURL="http://localhost:11434/v1"
+
+      # Required: Provider label (used internally for auth routing)
+      export OPENAI_COMP_PROVIDER="ollama"
+
+      # Optional: API key (usually not needed for local Ollama)
+      export OPENAI_COMP_APIKEY=""
+
+   Alternatively, you can use `-m oaic-env` to read the model name from
+   the `OPENAI_COMP_MODEL` environment variable:
+
+   .. code:: bash
+
+      export OPENAI_COMP_MODEL="llama3.1"
+      ▶ code-scribe translate <filelist> -m oaic-env -p <seed_prompt.toml>
+
+   This approach is useful when you want to switch models without
+   changing the command line.
+
+   **Note**: For ALCF inference endpoints, set `OPENAI_COMP_PROVIDER` to
+   a value containing `alcf` (e.g., `alcf-inference`) and ensure
+   `ALCF_INFERENCE_APIKEY` is set.
+
 #. **Saving Custom Prompts**: Instead of selecting a model and running
    the commands interactively, you can also save the generated prompts
    for later use. Use the `--save-prompts` flag to store the prompts in
