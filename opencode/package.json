@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "@opencode-ai/plugin": "^1.1.50",
+    "@opencode-ai/plugin": "0.0.0-adhruv/development-202602182246",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
