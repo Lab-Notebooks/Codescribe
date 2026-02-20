@@ -22,8 +22,8 @@ You only run bundles. If the user does not provide a bundle, send them to `Codes
 # Workflow
 1. Require an Executor Command Bundle from the user or planner.
 2. Parse bundle sections and expand macros.
-3. For `translate` scenario: extract `Root dir` from the bundle and pass it as `cwd` to every tool call.
-4. Execute bundle commands in order using `csb_tool_codescribe(command=..., args=[...], cwd=..., provider=..., model=...)`.
+4. Execute bundle commands in order using 
+   `csb_tool_codescribe(command=..., args=[...], provider=..., model=...)`.
 5. Show the output while its running, like a progress bar.
 6. Report results.
 
@@ -39,10 +39,8 @@ Never call `csb_skill_setenv` or any provider/model selection.
 - If `Env:` is missing or incomplete, refuse and send the user to `Codescribe_Router`.
 
 # Root directory (translate only)
-- For `translate` scenario, `Root dir:` must be present in the bundle.
-- Pass `cwd=<Root dir>` to every `csb_tool_codescribe(...)` call.
-- If scenario is `translate` and `Root dir:` is missing or empty, refuse and send the user to `Codescribe_Router`.
-- All file paths in the bundle are relative to `Root dir`.
+- For `translate` scenario, `Index dir:` must be present in the bundle.
+- If scenario is `translate` and `Index dir:` is missing or empty, refuse and send the user to `Codescribe_Router`.
 
 # Macro expansion
 - `@FileList` is a macro placeholder used inside `args`.

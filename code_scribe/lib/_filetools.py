@@ -150,7 +150,7 @@ def load_chat_template(filepath: Path) -> List[Dict[str, str]]:
     for i in range(1, len(roles)):
         if roles[i] == roles[i - 1]:
             raise ValueError(
-                f"Invalid role order at positions {i} and {i+1}: "
+                f"Invalid role order at positions {i} and {i + 1}: "
                 f"two consecutive '{roles[i]}' entries found."
             )
     return chat_template
@@ -310,7 +310,7 @@ def create_scribe_yaml(root_directory: Path) -> None:
                 scribe_data["files"][filename] = fortran_info
 
         # Only write to scribe.yaml if there are Fortran files in the directory
-        #if scribe_data["files"]:
+        # if scribe_data["files"]:
         yaml_path = os.path.join(dirpath, "scribe.yaml")
         with open(yaml_path, "w") as yaml_file:
             yaml.dump(scribe_data, yaml_file, default_flow_style=False)
@@ -331,45 +331,64 @@ def create_file_indexes() -> Dict[str, str]:
     # Start with the current working directory
     cwd = os.getcwd()
 
-    # Load the scribe.yaml from the current directory
+    # Try to find scribe.yaml: first check cwd, then search downward
     yaml_path = os.path.join(cwd, "scribe.yaml")
     if not os.path.exists(yaml_path):
-        raise FileNotFoundError(f"No scribe.yaml found in {cwd}")
+        # Search downward until we find the first scribe.yaml
+        yaml_path = None
+        for dirpath, dirnames, filenames in os.walk(cwd):
+            # Sort dirnames for deterministic traversal order
+            dirnames.sort()
+            if "scribe.yaml" in filenames:
+                yaml_path = os.path.join(dirpath, "scribe.yaml")
+                break
 
-    scribe_data = load_scribe_yaml(yaml_path)
+        # No scribe.yaml found anywhere under cwd; skip gracefully
+        if yaml_path is None:
+            return {}
+
+    # Load the anchor scribe.yaml
+    try:
+        scribe_data = load_scribe_yaml(Path(yaml_path))
+    except Exception:
+        return {}
 
     # Get the root directory from the scribe.yaml file
     root_directory = scribe_data.get("root", None)
     if not root_directory:
-        raise ValueError(f"No 'root' entry found in {yaml_path}")
+        return {}
 
     file_index = {}
 
     # Traverse the directory tree starting from the root directory
     for dirpath, _, filenames in os.walk(root_directory):
-        for filename in filenames:
-            if filename == "scribe.yaml":
-                filepath = os.path.join(dirpath, filename)
-                scribe_data = load_scribe_yaml(filepath)
+        if "scribe.yaml" not in filenames:
+            continue
 
-                # Update combined index with data from the current scribe.yaml
-                for file, info in scribe_data["files"].items():
-                    file_path = os.path.join(dirpath, file)  # Full file path
+        filepath = os.path.join(dirpath, "scribe.yaml")
+        try:
+            scribe_data = load_scribe_yaml(Path(filepath)) or {}
+        except Exception:
+            continue
 
-                    # Extract modules, subroutines, and functions
-                    modules = info.get("modules", [])
-                    subroutines = info.get("subroutines", [])
-                    functions = info.get("functions", [])
+        # Update combined index with data from the current scribe.yaml
+        for file, info in (scribe_data.get("files") or {}).items():
+            file_path = os.path.join(dirpath, file)  # Full file path
 
-                    # Add modules to combined index
-                    for mod in modules:
-                        file_index[mod] = file_path
-                    # Add subroutines to combined index
-                    for sub in subroutines:
-                        file_index[sub] = file_path
-                    # Add functions to combined index
-                    for func in functions:
-                        file_index[func] = file_path
+            # Extract modules, subroutines, and functions
+            modules = info.get("modules", [])
+            subroutines = info.get("subroutines", [])
+            functions = info.get("functions", [])
+
+            # Add modules to combined index
+            for mod in modules:
+                file_index[mod] = file_path
+            # Add subroutines to combined index
+            for sub in subroutines:
+                file_index[sub] = file_path
+            # Add functions to combined index
+            for func in functions:
+                file_index[func] = file_path
 
     return file_index
 
@@ -699,7 +718,6 @@ def annotate_fortran_file(sfile: Path, file_index: Dict[str, str]) -> str:
 
     # Write the output to the .scribe file
     with open(scribe_filename, "w") as scribe_file:
-
         scribe_file.write("\n".join(prompt_lines))
         scribe_file.write("\n\n")
 

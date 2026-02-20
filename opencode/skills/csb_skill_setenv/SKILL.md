@@ -1,6 +1,6 @@
 ---
 name: csb_skill_setenv
-description: I resolve model and provider for tools that run agents.
+description: I resolve model and provider for codescribe bundles.
 
 ---
 
