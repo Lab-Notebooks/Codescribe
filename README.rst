@@ -395,11 +395,11 @@ translation of Fortran codebases to C++. Please see the source file
    @software{akash_dhruv_2024_13879406,
    author       = {Akash Dhruv},
    title        = {akashdhruv/CodeScribe: 2024.09},
-   month        = oct,
-   year         = 2024,
+   month        = feb,
+   year         = 2026,
    publisher    = {Zenodo},
-   version      = {2024.09},
-   doi          = {10.5281/zenodo.13879406},
+   version      = {2026.02},
+   doi          = {10.5281/zenodo.18738066}
    url          = {https://github.com/akashdhruv/CodeScribe}
    }
 
