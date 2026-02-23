@@ -394,7 +394,7 @@ translation of Fortran codebases to C++. Please see the source file
 
    @software{akash_dhruv_2024_13879406,
    author       = {Akash Dhruv},
-   title        = {akashdhruv/CodeScribe: 2024.09},
+   title        = {akashdhruv/CodeScribe: 2026.02},
    month        = feb,
    year         = 2026,
    publisher    = {Zenodo},
