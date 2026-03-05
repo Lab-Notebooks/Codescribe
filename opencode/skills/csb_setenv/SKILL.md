@@ -1,5 +1,5 @@
 ---
-name: csb_skill_setenv
+name: csb_setenv
 description: Resolve model and provider for codescribe bundles.
 
 ---
