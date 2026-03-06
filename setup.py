@@ -43,7 +43,7 @@ setup(
     #        "resources/Dockerfile.user",
     #    ]
     #},
-    scripts=["codescribe/code-scribe"],
+    entry_points={"console_scripts": ["code-scribe=codescribe.cli:code_scribe"]},
     include_package_data=True,
     long_description=long_description,
     classifiers=[

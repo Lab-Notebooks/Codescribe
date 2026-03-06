@@ -1,2 +1,2 @@
-'smolagents[toolkit]'
-'crewai[tools]'
+smolagents[toolkit]
+crewai[tools]
