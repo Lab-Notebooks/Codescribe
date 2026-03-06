@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Union, List
 
-from code_scribe import lib
+from codescribe import lib
 
 
 def index(root_dir: Path) -> str:

@@ -8,7 +8,7 @@ from typing import List, Dict, Union
 from pathlib import Path
 from alive_progress import alive_bar
 
-from code_scribe import lib
+from codescribe import lib
 
 
 class OpenAICompModel:

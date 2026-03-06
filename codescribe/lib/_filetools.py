@@ -10,7 +10,7 @@ from pathlib import Path
 from textwrap import wrap
 from typing import List, Dict, Set, Any
 
-from code_scribe import lib
+from codescribe import lib
 
 
 def create_archive_file(

@@ -2,7 +2,7 @@
    :width: 35
 
 ###################
- |icon| CodeScribe
+ |icon| Codescribe
 ###################
 
 |Code style: black|
@@ -11,7 +11,7 @@
  Overview
 **********
 
-Code-Scribe is an AI-assisted framework designed to streamline
+Codescribe is an AI-assisted framework designed to streamline
 Fortran-to-C++ code translation and facilitate the development and
 maintenance of scientific codebases. It automates the process of
 generating corresponding C++ source files and creating Fortran-C++
@@ -19,7 +19,7 @@ interfaces, simplifying the integration of Fortran and C++. The tool
 allows users to interface with large language models (LLMs) through the
 API endpoints and locally through the Transformers library, and enables
 the creation of custom prompts tailored to the specific needs of the
-source code. Code-Scribe empowers research software engineers by
+source code. Codescribe empowers research software engineers by
 complementing existing tools like OpenAI Codex and addressing the niche
 requirements of scientific software development.
 
@@ -76,10 +76,10 @@ portability across various heterogeneous high-performance computing
 results in broken functionality and unmanageable complexity. Incremental
 translation, which involves creating Fortran-C++ layers, testing, and
 iteratively converting the code, is a more practical approach.
-Code-Scribe supports this process by automating the creation of these
+Codescribe supports this process by automating the creation of these
 interfaces and assisting with generative AI to improve efficiency and
 accuracy, ensuring that performance and functionality are maintained
-throughout the conversion. Additionally, Code-Scribe facilitates code
+throughout the conversion. Additionally, Codescribe facilitates code
 generation and updates, enabling users to create new applications or
 modify existing files seamlessly.
 
@@ -87,7 +87,7 @@ modify existing files seamlessly.
  Installation
 **************
 
-At present, we recommend installing Code-Scribe in a virtual
+At present, we recommend installing Codescribe in a virtual
 environment:
 
 .. code:: bash
@@ -96,7 +96,7 @@ environment:
    source env/bin/activate
    pip install --upgrade pip
 
-And install Code-Scribe using ``pip`` in editable mode:
+And install Codescribe using ``pip`` in editable mode:
 
 .. code:: bash
 
@@ -235,7 +235,7 @@ Following is a brief overview of different commands:
  Integrating LLM of Choice
 ***************************
 
-#. **OpenAI Model**: Code-Scribe supports OpenAI's GPT models (such as
+#. **OpenAI Model**: Codescribe supports OpenAI's GPT models (such as
    `gpt-4`, `gpt-3.5-turbo`, etc.) via the OpenAI API. To use OpenAI's
    models, specify `-m openai-gpt-4o` when executing the commands, as
    shown below:
@@ -261,7 +261,7 @@ Following is a brief overview of different commands:
 #. **Hugging Face Transformers (TFModel)**: If you want to use a Hugging
    Face model, such as those found on the Hugging Face model hub (e.g.,
    Mistral, Llama), you can specify the path to the pre-trained model or
-   use a model directly from the Hugging Face library. Code-Scribe
+   use a model directly from the Hugging Face library. Codescribe
    supports this integration with the `TFModel` class.
 
    To use a Hugging Face model, first install the necessary libraries if
@@ -282,7 +282,7 @@ Following is a brief overview of different commands:
    `https://huggingface.co/models` and choosing one that fits your
    needs.
 
-#. **ARGO Models**: Code-Scribe also supports integration with Argonne's
+#. **ARGO Models**: Codescribe also supports integration with Argonne's
    ARGO models, such as `argo-gpt4o`. These models are accessible on the
    Argonne network by setting the environment variables `ARGO_USER` and
    `ARGO_API_ENDPOINT`. To use ARGO models, specify `-m argo-gpt4o` or
@@ -304,7 +304,7 @@ Following is a brief overview of different commands:
    ARGO models are recommended for users with access to the Argonne
    network.
 
-#. **OpenAI-Compatible Endpoints (Ollama, etc.)**: Code-Scribe supports
+#. **OpenAI-Compatible Endpoints (Ollama, etc.)**: Codescribe supports
    any OpenAI-compatible API endpoint, making it easy to use on-premises
    models such as Ollama. To use an OpenAI-compatible endpoint, specify
    `-m oaic-<model>` where `<model>` is the model name served by your
@@ -359,7 +359,7 @@ Following is a brief overview of different commands:
  Environment Variables
 ***********************
 
-To streamline the usage of Code-Scribe and avoid repeatedly specifying
+To streamline the usage of Codescribe and avoid repeatedly specifying
 the `-m` flag for model selection, you can set the environment variable
 `CODESCRIBE_MODEL` to the desired model name or path. For example:
 
@@ -382,7 +382,7 @@ By setting these environment variables, you can simplify your workflow
 and ensure that all interactions are logged for future reference.
 
 By following these steps, you can integrate any of the supported
-language models into Code-Scribe and use them for incremental
+language models into Codescribe and use them for incremental
 translation of Fortran codebases to C++. Please see the source file
 `lib/_llm.py` to view the source code.
 
@@ -394,13 +394,13 @@ translation of Fortran codebases to C++. Please see the source file
 
    @software{akash_dhruv_2024_13879406,
    author       = {Akash Dhruv},
-   title        = {akashdhruv/CodeScribe: 2026.02},
+   title        = {akashdhruv/Codescribe: 2026.02},
    month        = feb,
    year         = 2026,
    publisher    = {Zenodo},
    version      = {2026.02},
    doi          = {10.5281/zenodo.18738066}
-   url          = {https://github.com/akashdhruv/CodeScribe}
+   url          = {https://github.com/akashdhruv/Codescribe}
    }
 
 .. code:: latex

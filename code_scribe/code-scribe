@@ -1,6 +1,0 @@
-#!/usr/bin/env python3
-
-import code_scribe
-
-if __name__ == "__main__":
-    code_scribe.cli.code_scribe()

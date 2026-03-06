@@ -8,9 +8,9 @@ from typing import Union, List
 # Feature libraries
 import click
 
-from code_scribe.cli import code_scribe
-from code_scribe import api
-from code_scribe import lib
+from codescribe.cli import code_scribe
+from codescribe import api
+from codescribe import lib
 
 
 @code_scribe.command(name="index")
