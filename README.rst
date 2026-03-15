@@ -41,6 +41,10 @@ requirements of scientific software development.
    -  https://erf.readthedocs.io/en/latest/CouplingToNoahMP.html
    -  https://mcfm.fnal.gov
 
+-  Demo:
+
+   -  https://doi.org/10.5281/zenodo.18853292
+
 **************
  Key Features
 **************
