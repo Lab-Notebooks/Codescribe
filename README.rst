@@ -239,10 +239,10 @@ Following is a brief overview of different commands:
  Integrating LLM of Choice
 ***************************
 
-#. **OpenAI Model**: Codescribe supports OpenAI's GPT models (such as
-   `gpt-4`, `gpt-3.5-turbo`, etc.) via the OpenAI API. To use OpenAI's
-   models, specify `-m openai-gpt-4o` when executing the commands, as
-   shown below:
+#. **OpenAI Models**: Codescribe supports OpenAI's GPT models (such as
+   `gpt-4`, `gpt-3.5-turbo`, etc.) via the OpenAI API. The ``openai-``
+   prefix is required when specifying OpenAI models. For example, to use
+   `gpt-4o`:
 
    .. code:: bash
 
@@ -287,7 +287,8 @@ Following is a brief overview of different commands:
    needs.
 
 #. **ARGO Models**: Codescribe also supports integration with Argonne's
-   ARGO models, such as `argo-gpt4o`. These models are accessible on the
+   ARGO models, such as `argo-gpt4o`. The ``argo-`` prefix is required
+   when specifying ARGO models. These models are accessible on the
    Argonne network by setting the environment variables `ARGO_USER` and
    `ARGO_API_ENDPOINT`. To use ARGO models, specify `-m argo-gpt4o` or
    any other ARGO-supported model of your choice when executing
@@ -308,12 +309,53 @@ Following is a brief overview of different commands:
    ARGO models are recommended for users with access to the Argonne
    network.
 
-#. **OpenAI-Compatible Endpoints (Ollama, etc.)**: Codescribe supports
-   any OpenAI-compatible API endpoint, making it easy to use on-premises
-   models such as Ollama. To use an OpenAI-compatible endpoint, specify
-   `-m oaic-<model>` where `<model>` is the model name served by your
-   endpoint. For example, to use a locally running Ollama instance with
-   `llama3.1`:
+#. **Anthropic Models**: Codescribe supports Anthropic's Claude models
+   (such as `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`,
+   etc.) via the Anthropic API. The ``anthropic-`` prefix is required
+   when specifying these models. For example, to use Claude Opus 4.8:
+
+   .. code:: bash
+
+      ▶ code-scribe translate <filelist> -m anthropic-claude-opus-4-8 -p <seed_prompt.toml>
+
+   Ensure that the environment variable `ANTHROPIC_API_KEY` is set with
+   your Anthropic API key:
+
+   .. code:: bash
+
+      export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
+
+   And install the Anthropic library:
+
+   .. code:: bash
+
+      pip install anthropic
+
+   You can also use this backend for Claude Code Agent sessions by
+   specifying the ``claudecode`` prefix (see below), but ``anthropic-``
+   routes directly through the Anthropic API without the Claude CLI.
+
+#. **Claude Code Agent**: Codescribe can use the ``claude`` CLI as a
+   subprocess for agentic interactions. The ``claudecode`` prefix invokes
+   the installed Claude Code CLI. For example:
+
+   .. code:: bash
+
+      ▶ code-scribe inspect <filelist> -q "<query>" -m claudecode-claude-sonnet-4-6
+
+   The ``claude`` CLI must be installed and available in your ``PATH``:
+
+   .. code:: bash
+
+      npm install -g @anthropic-ai/claude-code
+
+#. **OpenAI-Compatible Endpoints (Ollama, ALCF, etc.)**: Codescribe
+   supports any OpenAI-compatible API endpoint via the ``oaic-`` prefix.
+   The ``oaic-`` prefix is **required** — it routes the request to the
+   endpoint configured via ``OPENAI_COMP_BASEURL``. This makes it
+   straightforward to use on-premises models such as Ollama or hosted
+   inference services. For example, to use a locally running Ollama
+   instance with `llama3.1`:
 
    .. code:: bash
 
@@ -331,17 +373,6 @@ Following is a brief overview of different commands:
 
       # Optional: API key (usually not needed for local Ollama)
       export OPENAI_COMP_APIKEY=""
-
-   Alternatively, you can use `-m oaic-env` to read the model name from
-   the `OPENAI_COMP_MODEL` environment variable:
-
-   .. code:: bash
-
-      export OPENAI_COMP_MODEL="llama3.1"
-      ▶ code-scribe translate <filelist> -m oaic-env -p <seed_prompt.toml>
-
-   This approach is useful when you want to switch models without
-   changing the command line.
 
    **Note**: For ALCF inference endpoints, set `OPENAI_COMP_PROVIDER` to
    a value containing `alcf` (e.g., `alcf-inference`) and ensure

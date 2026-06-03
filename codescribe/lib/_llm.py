@@ -2,7 +2,7 @@
 
 # Import libraries
 import re
-import os, sys, importlib, json, requests
+import os, sys, importlib, json, requests, subprocess, shutil
 
 from typing import List, Dict, Union
 from pathlib import Path
@@ -23,22 +23,11 @@ class OpenAICompModel:
         if not self.provider:
             raise ValueError("OPENAI_COMP_PROVIDER environment variable is not set")
 
-        if model.lower() == "env":
-            self.model = os.getenv("OPENAI_COMP_MODEL")
-        else:
-            self.model = model
+        self.model = model
 
-        if os.getenv("OPENAI_COMP_APIKEY"):
-            self.apikey = os.getenv("OPENAI_COMP_APIKEY")
-
-        elif "alcf" in self.provider:
-            self.apikey = os.getenv("ALCF_INFERENCE_APIKEY")
-            if not self.apikey:
-                raise ValueError(
-                    "ALCF_INFERENCE_APIKEY environment variable is not set"
-                )
-        else:
-            self.apikey = "null"
+        self.apikey = os.getenv("OPENAI_COMP_APIKEY")
+        if not self.apikey:
+            raise ValueError("OPENAI_COMP_APIKEY environment variable is not set")
 
         self.pipeline = openai.OpenAI(api_key=self.apikey, base_url=self.baseurl)
         self.outputs = 1
@@ -132,153 +121,105 @@ class ArgoModel:
         return f"ArgoModel(model='{self.model}', api_endpoint='***', user='***')"
 
 
-class KimiModel:
-    """
-    Client for a locally hosted OpenAI-compatible Chat Completions API.
+class AnthropicModel:
+    def __init__(self, model: str) -> None:
+        anthropic = importlib.import_module("anthropic")
 
-    Expects the API key in the environment variable: KIMI_API_KEY
-    Expects the API endpoint in the environment variable: KIMI_API_ENDPOINT
+        self.apikey = os.getenv("ANTHROPIC_API_KEY")
+        if not self.apikey:
+            raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
 
-    Default model:
-      moonshotai/Kimi-K2-Instruct
-    """
-
-    def __init__(self) -> None:
-        self.api_key = os.getenv("KIMI_API_KEY")
-        if not self.api_key:
-            raise ValueError("KIMI_API_KEY environment variable is not set")
-
-        self.endpoint = os.getenv("KIMI_API_ENDPOINT")
-        if not self.endpoint:
-            raise ValueError("KIMI_API_ENDPOINT environment variable is not set")
-
-        self.model = "moonshotai/Kimi-K2-Instruct"
-        self.outputs = 1
+        self.client = anthropic.Anthropic(api_key=self.apikey)
+        self.model = model
         self.max_tokens = 4096
-        self.timeout = 120
-
-        self._session = requests.Session()
-        self._headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
 
     def chat(self, chat_template: List[Dict[str, str]]) -> str:
-        """
-        Send messages to the chat completion endpoint.
+        system = None
+        messages = []
+        for msg in chat_template:
+            if msg["role"] == "system":
+                system = msg["content"]
+            else:
+                messages.append({"role": msg["role"], "content": msg["content"]})
 
-        Parameters
-        ----------
-        chat_template : list[dict]
-            OpenAI-style messages, e.g.:
-            [
-              {"role": "system", "content": "You are helpful."},
-              {"role": "user", "content": "Hello!"}
-            ]
-
-        Returns
-        -------
-        str
-            The assistant's reply (first choice).
-        """
-        payload = {
+        kwargs = {
             "model": self.model,
-            "messages": chat_template,
             "max_tokens": self.max_tokens,
-            "n": self.outputs,
+            "messages": messages,
         }
+        if system:
+            kwargs["system"] = system
 
-        resp = self._session.post(
-            self.endpoint, headers=self._headers, json=payload, timeout=self.timeout
-        )
-        try:
-            resp.raise_for_status()
-        except requests.HTTPError as e:
-            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}") from e
+        response = self.client.messages.create(**kwargs)
 
-        data = resp.json()
-
-        try:
-            return data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError) as e:
-            raise RuntimeError(f"Unexpected response format: {data}") from e
+        for block in response.content:
+            if block.type == "text":
+                return block.text
+        return ""
 
     def __repr__(self) -> str:
-        return f"KimiModel(model='{self.model}', endpoint='***', outputs={self.outputs}, max_tokens={self.max_tokens})"
+        return f"AnthropicModel(model='{self.model}')"
 
 
-class QwenModel:
-    """
-    Client for a locally hosted OpenAI-compatible Chat Completions API.
-
-    Expects the API key in the environment variable: KIMI_API_KEY
-    Default endpoint:
-      http://llm.ai.r-ccs.riken.jp:11434/kimi/v1/chat/completions
-    Default model:
-      moonshotai/Kimi-K2-Instruct
-    """
-
-    def __init__(self) -> None:
-        self.api_key = os.getenv("KIMI_API_KEY")
-        if not self.api_key:
-            raise ValueError("KIMI_API_KEY environment variable is not set")
-
-        self.endpoint = os.getenv("KIMI_API_ENDPOINT")
-        if not self.endpoint:
-            raise ValueError("KIMI_API_ENDPOINT environment variable is not set")
-
-        self.model = "qwen3-coder:30b"
-        self.outputs = 1
-        self.max_tokens = 4096
-        self.timeout = 120
-
-        self._session = requests.Session()
-        self._headers = {
-            "Content-Type": "application/json",
-        }
+class ClaudeCodeAgent:
+    def __init__(self, model: str = None) -> None:
+        if not shutil.which("claude"):
+            raise RuntimeError(
+                "claude CLI not found in PATH. "
+                "Install with: npm install -g @anthropic-ai/claude-code"
+            )
+        self.model = model  # None = use claude's default
 
     def chat(self, chat_template: List[Dict[str, str]]) -> str:
-        """
-        Send messages to the chat completion endpoint.
+        # Flatten the chat template into a single prompt passed via stdin.
+        # System content is prepended; assistant turns are labelled so Claude
+        # understands the conversation history.
+        parts = []
+        for msg in chat_template:
+            if msg["role"] == "system":
+                parts.append(msg["content"])
+            elif msg["role"] == "user":
+                parts.append(msg["content"])
+            elif msg["role"] == "assistant":
+                parts.append(f"Assistant: {msg['content']}")
 
-        Parameters
-        ----------
-        chat_template : list[dict]
-            OpenAI-style messages, e.g.:
-            [
-              {"role": "system", "content": "You are helpful."},
-              {"role": "user", "content": "Hello!"}
-            ]
+        prompt = "\n\n".join(parts)
 
-        Returns
-        -------
-        str
-            The assistant's reply (first choice).
-        """
-        payload = {
-            "model": self.model,
-            "messages": chat_template,
-            "max_tokens": self.max_tokens,
-            "n": self.outputs,
-        }
+        cmd = ["claude", "-p", "--output-format", "stream-json", "--verbose"]
+        if self.model:
+            cmd.extend(["--model", self.model])
 
-        resp = self._session.post(
-            self.endpoint, headers=self._headers, json=payload, timeout=self.timeout
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
-        try:
-            resp.raise_for_status()
-        except requests.HTTPError as e:
-            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}") from e
+        proc.stdin.write(prompt)
+        proc.stdin.close()
 
-        data = resp.json()
+        result_text = ""
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+                if event.get("type") == "assistant":
+                    for block in event.get("message", {}).get("content", []):
+                        if block.get("type") == "text":
+                            print(block["text"], flush=True)
+                elif event.get("type") == "result":
+                    result_text = event.get("result", "")
+            except json.JSONDecodeError:
+                pass
 
-        try:
-            return data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError) as e:
-            raise RuntimeError(f"Unexpected response format: {data}") from e
+        proc.wait()
+        return result_text
 
     def __repr__(self) -> str:
-        return f"QwenModel(model='{self.model}', endpoint='***', outputs={self.outputs}, max_tokens={self.max_tokens})"
+        return f"ClaudeCodeAgent(model='{self.model}')"
 
 
 class TFModel:
@@ -348,23 +289,31 @@ def _set_neural_model(model: Union[Path, str]) -> object:
     if os.path.exists(model):
         neural_model = TFModel(model)
 
-    elif model.lower().startswith("oaic-"):
-        neural_model = OpenAICompModel(model.lower().strip("oaic")[1:])
-
     elif model.lower().startswith("openai-"):
         neural_model = OpenAIModel(model.lower().strip("openai")[1:])
 
     elif model.lower().startswith("argo-"):
         neural_model = ArgoModel(model.lower().strip("argo")[1:])
 
-    elif model.lower() == "kimi":
-        neural_model = KimiModel()
+    elif model.lower().startswith("anthropic-"):
+        # "anthropic-claude-opus-4-8" → passes claude-opus-4-8 to AnthropicModel
+        neural_model = AnthropicModel(model[len("anthropic-"):])
 
-    elif model.lower() == "qwen":
-        neural_model = QwenModel()
+    elif model.lower().startswith("claudecode"):
+        # "claudecode"                   → uses claude's default model
+        # "claudecode-claude-sonnet-4-6" → passes --model to the CLI
+        suffix = model[len("claudecode"):]
+        agent_model = suffix.lstrip("-") or None
+        neural_model = ClaudeCodeAgent(agent_model)
+
+    elif model.lower().startswith("oaic-"):
+        neural_model = OpenAICompModel(model[len("oaic-"):])
 
     else:
-        raise ValueError(f"{model} is not available")
+        raise ValueError(
+            f"Unknown model '{model}'. Use a recognized prefix: "
+            "openai-, argo-, anthropic-, claudecode, oaic-, or a local path."
+        )
 
     return neural_model
 
