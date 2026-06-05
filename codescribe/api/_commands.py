@@ -100,3 +100,22 @@ def format(seed_prompt_list: List[Path]) -> None:
     """
     for seed_prompt in seed_prompt_list:
         lib.format_seed_prompt(seed_prompt)
+
+
+def agent(
+    task: str,
+    model: Union[Path, str],
+    system: str = "",
+    max_iterations: int = 20,
+    show_thinking: bool = False,
+) -> str:
+    """
+    API command for running the agentic loop on a task
+    """
+    return lib.prompt_agent(
+        task,
+        model=model,
+        system=system,
+        max_iterations=max_iterations,
+        show_thinking=show_thinking,
+    )

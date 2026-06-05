@@ -278,3 +278,53 @@ def format(seed_prompt_list: List[Path]) -> None:
     \b
     """
     api.format([Path(file) for file in seed_prompt_list])
+
+
+@code_scribe.command(name="agent")
+@click.argument("task", required=True)
+@click.option(
+    "--model",
+    "-m",
+    required=True,
+    default=os.getenv("CODESCRIBE_MODEL"),
+    help="Gen AI model name or path",
+)
+@click.option(
+    "--system",
+    "-s",
+    default="",
+    help="Optional system prompt prepended to the agent instructions",
+)
+@click.option(
+    "--max-iterations",
+    "-n",
+    default=20,
+    show_default=True,
+    help="Maximum number of tool-call iterations",
+)
+@click.option(
+    "--show-thinking",
+    "-v",
+    is_flag=True,
+    help="Print each agent iteration's reasoning and tool calls to stdout",
+)
+def agent(
+    task: str,
+    model: Union[str, Path],
+    system: str,
+    max_iterations: int,
+    show_thinking: bool,
+) -> None:
+    """
+    \b
+    Run an autonomous agent on a task
+    \b
+
+    \b
+    This command drives a generative AI model through an
+    iterative tool-call loop until the task is complete.
+    Available tools: read, bash, edit, write, grep, find, ls
+    \b
+    """
+    result = api.agent(task, model, system=system, max_iterations=max_iterations, show_thinking=show_thinking)
+    click.echo(result)
