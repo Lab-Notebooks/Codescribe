@@ -328,3 +328,70 @@ def agent(
     """
     result = api.agent(task, model, system=system, max_iterations=max_iterations, show_thinking=show_thinking)
     click.echo(result)
+
+
+@code_scribe.command(name="loop")
+@click.argument("spec-file", required=True, type=click.Path(exists=True))
+@click.argument("validation-file", required=True, type=click.Path(exists=True))
+@click.option(
+    "--model",
+    "-m",
+    required=True,
+    default=os.getenv("CODESCRIBE_MODEL"),
+    help="Gen AI model name or path",
+)
+@click.option(
+    "--max-rounds",
+    "-n",
+    default=5,
+    show_default=True,
+    help="Maximum number of execution/repair rounds",
+)
+@click.option(
+    "--agent-iterations",
+    default=12,
+    show_default=True,
+    help="Maximum tool-call iterations per agent session",
+)
+@click.option(
+    "--workdir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True),
+    default=None,
+    help="Working directory bound for both agents; defaults to the current directory",
+)
+@click.option(
+    "--show-thinking",
+    "-v",
+    is_flag=True,
+    help="Print each agent iteration's reasoning and tool calls to stdout",
+)
+def loop(
+    spec_file: Path,
+    validation_file: Path,
+    model: Union[str, Path],
+    max_rounds: int,
+    agent_iterations: int,
+    workdir: Union[str, None],
+    show_thinking: bool,
+) -> None:
+    """
+    \b
+    Run an execution/repair agent loop
+    \b
+
+    \b
+    This command runs a validation agent and a repair agent in fresh
+    sessions across multiple rounds. Persistent state is inferred only
+    from files in the working directory.
+    \b
+    """
+    result = api.loop(
+        spec_file=Path(spec_file),
+        validation_file=Path(validation_file),
+        model=model,
+        max_rounds=max_rounds,
+        agent_iterations=agent_iterations,
+        show_thinking=show_thinking,
+        workdir=Path(workdir) if workdir else None,
+    )
+    click.echo(result)

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
@@ -67,6 +68,11 @@ __all__ = [
     "BashTool",
     "EditTool",
     "WriteTool",
+    "BoundedReadTool",
+    "BoundedBashTool",
+    "BoundedEditTool",
+    "BoundedWriteTool",
+    "make_bounded_tools",
     "DEFAULT_TOOLS",
     "Agent",
 ]
@@ -344,12 +350,168 @@ class WriteTool(AgentTool):
             return f"Error: {exc}"
 
 
+def _resolve_within_root(root: Path, target: str) -> Path:
+    root = root.resolve()
+    candidate = Path(target)
+    if not candidate.is_absolute():
+        candidate = (root / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        raise ValueError(f"Path escapes working directory: {target}")
+
+    return candidate
+
+
+class BoundedReadTool(ReadTool):
+    def __init__(self, root: Path) -> None:
+        super().__init__()
+        self.root = Path(root).resolve()
+        self.description += " Access is restricted to the working directory tree."
+
+    def run(self, args: Dict[str, Any]) -> str:
+        try:
+            path = str(_resolve_within_root(self.root, args.get("path")))
+        except Exception as exc:
+            return f"Error: {exc}"
+        bounded_args = dict(args)
+        bounded_args["path"] = path
+        return super().run(bounded_args)
+
+
+class BoundedEditTool(EditTool):
+    def __init__(self, root: Path) -> None:
+        super().__init__()
+        self.root = Path(root).resolve()
+        self.description += " Access is restricted to the working directory tree."
+
+    def run(self, args: Dict[str, Any]) -> str:
+        try:
+            path = str(_resolve_within_root(self.root, args.get("path")))
+        except Exception as exc:
+            return f"Error: {exc}"
+        bounded_args = dict(args)
+        bounded_args["path"] = path
+        return super().run(bounded_args)
+
+
+class BoundedWriteTool(WriteTool):
+    def __init__(self, root: Path) -> None:
+        super().__init__()
+        self.root = Path(root).resolve()
+        self.description += " Access is restricted to the working directory tree."
+
+    def run(self, args: Dict[str, Any]) -> str:
+        try:
+            path = str(_resolve_within_root(self.root, args.get("path")))
+        except Exception as exc:
+            return f"Error: {exc}"
+        bounded_args = dict(args)
+        bounded_args["path"] = path
+        return super().run(bounded_args)
+
+
+class BoundedBashTool(BashTool):
+    def __init__(self, root: Path) -> None:
+        super().__init__()
+        self.root = Path(root).resolve()
+        self.description += (
+            " Commands execute with the working directory set to the bounded root."
+        )
+
+    def run(self, args: Dict[str, Any]) -> str:
+        cmd = args.get("command")
+        timeout = int(args.get("timeout", 30))
+        if not cmd:
+            return "Error: missing required argument 'command'"
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=str(self.root),
+            )
+        except subprocess.TimeoutExpired:
+            return f"Error: command timed out ({timeout} s)"
+        except Exception as exc:
+            return f"Error: {exc}"
+
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+        parts = [f"exit_code: {proc.returncode}"]
+        if stdout.strip():
+            parts.append(f"STDOUT:\n{stdout.rstrip()}")
+        if stderr.strip():
+            parts.append(f"STDERR:\n{stderr.rstrip()}")
+        if len(parts) == 1:
+            parts.append("(no output)")
+        return "\n\n".join(parts)
+
+
+def make_bounded_tools(root: Path) -> List[AgentTool]:
+    return [
+        BoundedReadTool(root),
+        BoundedBashTool(root),
+        BoundedEditTool(root),
+        BoundedWriteTool(root),
+    ]
+
+
 DEFAULT_TOOLS: List[AgentTool] = [
     ReadTool(),
     BashTool(),
     EditTool(),
     WriteTool(),
 ]
+
+
+def _fmt_args(name: str, args: Dict[str, Any]) -> str:
+    """Short human-readable preview of tool arguments."""
+    if name == "bash":
+        cmd = (args.get("command") or "").replace("\n", " ").strip()
+        return (cmd[:60] + "…") if len(cmd) > 60 else cmd
+    if name in ("read", "write"):
+        return args.get("path", "")
+    if name == "edit":
+        path = args.get("path", "")
+        n = len(args.get("edits") or [])
+        return f"{path}  ({n} edit{'s' if n != 1 else ''})"
+    s = json.dumps(args, ensure_ascii=False)
+    return (s[:60] + "…") if len(s) > 60 else s
+
+
+def _fmt_result(name: str, output: str) -> str:
+    """Short human-readable summary of tool output."""
+    if output.startswith("Error:"):
+        msg = output[6:].strip()
+        return "err  " + ((msg[:50] + "…") if len(msg) > 50 else msg)
+    if name == "bash":
+        lines = output.splitlines()
+        code_str = (lines[0] if lines else "").replace("exit_code:", "exit").strip()
+        content = [l for l in lines[1:] if l and l not in ("STDOUT:", "STDERR:")]
+        n = len(content)
+        if "exit 0" in code_str:
+            return f"{code_str}  {n} lines" if n > 0 else code_str
+        hint = content[0] if content else ""
+        hint = (hint[:40] + "…") if len(hint) > 40 else hint
+        return f"{code_str}  {hint}" if hint else code_str
+    if name == "read":
+        n = len(output.splitlines()) if output.strip() else 0
+        return f"{n} line{'s' if n != 1 else ''}" if n > 0 else "(empty)"
+    if name == "write":
+        m = re.search(r"\((\d+) bytes\)", output)
+        return f"{m.group(1)} B" if m else output.strip()[:30]
+    if name == "edit":
+        m = re.search(r"(\d+) replacement", output)
+        n = int(m.group(1)) if m else 0
+        return f"{n} edit{'s' if n != 1 else ''}"
+    return (output.splitlines()[0][:40]) if output else "(empty)"
 
 
 class Agent:
@@ -421,14 +583,7 @@ class Agent:
         return match.group(1).strip() if match else None
 
     def _print_thinking(self, iteration: int, response: str) -> None:
-        """Print a formatted summary of one agent iteration."""
-        print(f"\n[Agent] iteration {iteration}")
-        # Show the model's reasoning text (everything outside the protocol tags)
-        thinking = re.sub(r"<tool_call>.*?</tool_call>", "", response, flags=re.DOTALL)
-        thinking = re.sub(r"<final_answer>.*?</final_answer>", "", thinking, flags=re.DOTALL).strip()
-        if thinking:
-            for line in thinking.splitlines():
-                print(f"  {line}")
+        print(f"  iter {iteration}")
 
     def _run_text_protocol(
         self,
@@ -465,21 +620,16 @@ class Agent:
                         call_name = "?"
                         output = f"Error parsing tool call: {call['_parse_error']}"
                         if self.show_thinking:
-                            print(f"  [tool] parse error: {call['_parse_error']}")
+                            print(f"    ✗ parse error: {call['_parse_error'][:80]}")
                     else:
                         call_name = call.get("name", "")
                         call_args = call.get("args", {})
                         if self.show_thinking:
-                            args_str = json.dumps(call_args, ensure_ascii=False)
-                            if len(args_str) > 120:
-                                args_str = args_str[:117] + "..."
-                            print(f"  [tool] {call_name}: {args_str}")
+                            args_preview = _fmt_args(call_name, call_args)
+                            print(f"    ▸ {call_name:<5}  {args_preview:<60}", end="", flush=True)
                         output = self._execute(call_name, call_args)
                         if self.show_thinking:
-                            lines = output.splitlines()
-                            preview = lines[0] if lines else "(no output)"
-                            suffix = f" (+{len(lines) - 1} lines)" if len(lines) > 1 else ""
-                            print(f"  [result] {preview}{suffix}")
+                            print(f"  {_fmt_result(call_name, output)}")
 
                     result_blocks.append(
                         "<tool_result>\n"
@@ -509,7 +659,7 @@ class Agent:
                     })
                     continue
                 if self.show_thinking:
-                    print(f"\n[Agent] done\n")
+                    print()
                 return final
 
             # No tool calls and no final answer: push back.
