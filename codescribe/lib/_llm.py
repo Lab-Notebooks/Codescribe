@@ -1,6 +1,6 @@
 import os, importlib, json, requests
 
-from typing import List, Dict
+from typing import Any, List, Dict
 from pathlib import Path
 
 
@@ -28,7 +28,7 @@ class OpenAICompModel:
 
     @property
     def supports_native_tools(self) -> bool:
-        return False
+        return True
 
     def chat(self, chat_template: List[Dict[str, str]]) -> str:
         response = self.pipeline.chat.completions.create(
@@ -39,6 +39,47 @@ class OpenAICompModel:
         )
 
         return response.choices[0].message.content
+
+    def chat_with_tools(self, chat_template: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> Dict[str, Any]:
+        response = self.pipeline.chat.completions.create(
+            model=self.model,
+            messages=chat_template,
+            tools=tools,
+            max_tokens=self.max_tokens,
+            n=self.outputs,
+        )
+        return _normalize_openai_tool_response(response.choices[0].message)
+
+    def format_tool_result_messages(self, tool_calls: List[Dict[str, Any]], outputs: List[str]) -> List[Dict[str, Any]]:
+        assistant_tool_calls = []
+        for call in tool_calls:
+            assistant_tool_calls.append(
+                {
+                    "id": call["id"],
+                    "type": "function",
+                    "function": {
+                        "name": call["name"],
+                        "arguments": json.dumps(call["arguments"], ensure_ascii=False),
+                    },
+                }
+            )
+
+        messages: List[Dict[str, Any]] = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": assistant_tool_calls,
+            }
+        ]
+        for call, output in zip(tool_calls, outputs):
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call["id"],
+                    "content": output,
+                }
+            )
+        return messages
 
     def __repr__(self) -> str:
         return f"OpenAICompModel(model='{self.model}')"
@@ -54,7 +95,7 @@ class OpenAIModel:
 
     @property
     def supports_native_tools(self) -> bool:
-        return False
+        return True
 
     def chat(self, chat_template: List[Dict[str, str]]) -> str:
         response = self.pipeline.chat.completions.create(
@@ -65,6 +106,47 @@ class OpenAIModel:
         )
 
         return response.choices[0].message.content
+
+    def chat_with_tools(self, chat_template: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> Dict[str, Any]:
+        response = self.pipeline.chat.completions.create(
+            model=self.model,
+            messages=chat_template,
+            tools=tools,
+            max_tokens=self.max_tokens,
+            n=self.outputs,
+        )
+        return _normalize_openai_tool_response(response.choices[0].message)
+
+    def format_tool_result_messages(self, tool_calls: List[Dict[str, Any]], outputs: List[str]) -> List[Dict[str, Any]]:
+        assistant_tool_calls = []
+        for call in tool_calls:
+            assistant_tool_calls.append(
+                {
+                    "id": call["id"],
+                    "type": "function",
+                    "function": {
+                        "name": call["name"],
+                        "arguments": json.dumps(call["arguments"], ensure_ascii=False),
+                    },
+                }
+            )
+
+        messages: List[Dict[str, Any]] = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": assistant_tool_calls,
+            }
+        ]
+        for call, output in zip(tool_calls, outputs):
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call["id"],
+                    "content": output,
+                }
+            )
+        return messages
 
     def __repr__(self) -> str:
         return f"OpenAIModel(model='{self.model}', outputs={self.outputs}, max_tokens={self.max_tokens})"
@@ -136,7 +218,7 @@ class AnthropicModel:
 
     @property
     def supports_native_tools(self) -> bool:
-        return False
+        return True
 
     def chat(self, chat_template: List[Dict[str, str]]) -> str:
         system = None
@@ -161,6 +243,39 @@ class AnthropicModel:
             if block.type == "text":
                 return block.text
         return ""
+
+    def chat_with_tools(self, chat_template: List[Dict[str, Any]], tools: List[Dict[str, Any]]) -> Dict[str, Any]:
+        system = None
+        messages = []
+        for msg in chat_template:
+            if msg["role"] == "system":
+                system = msg["content"]
+            else:
+                messages.append(msg)
+
+        kwargs = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "messages": messages,
+            "tools": [_openai_tool_to_anthropic_tool(tool) for tool in tools],
+        }
+        if system:
+            kwargs["system"] = system
+
+        response = self.client.messages.create(**kwargs)
+        return _normalize_anthropic_tool_response(response)
+
+    def format_tool_result_messages(self, tool_calls: List[Dict[str, Any]], outputs: List[str]) -> List[Dict[str, Any]]:
+        content = []
+        for call, output in zip(tool_calls, outputs):
+            content.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": call["id"],
+                    "content": output,
+                }
+            )
+        return [{"role": "user", "content": content}]
 
     def __repr__(self) -> str:
         return f"AnthropicModel(model='{self.model}')"
@@ -204,6 +319,51 @@ class TFModel:
 
     def __repr__(self) -> str:
         return f"TFModel(model={self.config.model_type}, max_new_tokens={self.max_new_tokens}, batch_size={self.batch_size}, max_length={self.max_length})"
+
+
+def _normalize_openai_tool_response(message: Any) -> Dict[str, Any]:
+    text = message.content or ""
+    tool_calls = []
+    for call in getattr(message, "tool_calls", []) or []:
+        raw_args = call.function.arguments or "{}"
+        try:
+            arguments = json.loads(raw_args)
+        except json.JSONDecodeError:
+            arguments = {}
+        tool_calls.append(
+            {
+                "id": call.id,
+                "name": call.function.name,
+                "arguments": arguments,
+            }
+        )
+    return {"text": text, "tool_calls": tool_calls}
+
+
+def _openai_tool_to_anthropic_tool(tool: Dict[str, Any]) -> Dict[str, Any]:
+    fn = tool["function"]
+    return {
+        "name": fn["name"],
+        "description": fn.get("description", ""),
+        "input_schema": fn["parameters"],
+    }
+
+
+def _normalize_anthropic_tool_response(response: Any) -> Dict[str, Any]:
+    texts = []
+    tool_calls = []
+    for block in response.content:
+        if block.type == "text":
+            texts.append(block.text)
+        elif block.type == "tool_use":
+            tool_calls.append(
+                {
+                    "id": block.id,
+                    "name": block.name,
+                    "arguments": dict(block.input or {}),
+                }
+            )
+    return {"text": "\n".join(t for t in texts if t).strip(), "tool_calls": tool_calls}
 
 
 def _merge_system_with_user(

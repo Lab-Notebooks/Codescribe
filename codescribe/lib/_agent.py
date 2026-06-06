@@ -4,6 +4,7 @@ import copy
 import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -40,9 +41,6 @@ You can inspect files, run shell commands, edit files precisely, and write files
 IMPORTANT: You MUST use tools to perform any action. Never describe what you would do —
 actually execute it by calling the appropriate tool. Do not fabricate file contents,
 command output, or any other results.
-Before reading a file, verify the path exists first (e.g. bash `test -f <path> && echo exists`).
-Do not attempt to read a path you have not confirmed exists.
-
 Available tools:
 {tool_list}
 
@@ -218,6 +216,100 @@ class BashTool(AgentTool):
                 text=True,
                 timeout=timeout,
                 cwd=self.cwd,
+            )
+        except subprocess.TimeoutExpired:
+            return f"Error: command timed out ({timeout} s)"
+        except Exception as exc:
+            return f"Error: {exc}"
+
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+        parts = [f"exit_code: {proc.returncode}"]
+        if stdout.strip():
+            parts.append(f"STDOUT:\n{stdout.rstrip()}")
+        if stderr.strip():
+            parts.append(f"STDERR:\n{stderr.rstrip()}")
+        if len(parts) == 1:
+            parts.append("(no output)")
+        return "\n\n".join(parts)
+
+
+class BoundedBashTool(BashTool):
+    """Safer bash variant for bounded mode."""
+
+    _BLOCKED_CHARS = set("|&;><`$\\")
+    _DEFAULT_ALLOWED = {
+        "ls",
+        "pwd",
+        "find",
+        "grep",
+        "head",
+        "tail",
+        "wc",
+        "git",
+        "test",
+        "echo",
+        "sed",
+    }
+
+    def __init__(self, cwd: Path, allowed_commands: Optional[set] = None) -> None:
+        super().__init__(cwd=cwd)
+        self.cwd_path = Path(cwd).resolve()
+        self.allowed_commands = allowed_commands or set(self._DEFAULT_ALLOWED)
+        self.description += (
+            " In bounded mode, commands are validated before execution, shell metacharacters"
+            " are rejected, and only a small allowlist of commands is permitted."
+        )
+
+    def _validate_bounded_command(self, cmd: str) -> Optional[str]:
+        if any(ch in cmd for ch in self._BLOCKED_CHARS):
+            return "shell metacharacters are not allowed in bounded mode"
+
+        try:
+            argv = shlex.split(cmd)
+        except ValueError as exc:
+            return f"invalid shell syntax: {exc}"
+
+        if not argv:
+            return "empty command"
+
+        prog = argv[0]
+        if "/" in prog:
+            return "explicit executable paths are not allowed in bounded mode"
+        if prog not in self.allowed_commands:
+            return f"command {prog!r} is not allowed in bounded mode"
+
+        for token in argv[1:]:
+            if token.startswith("-"):
+                continue
+            if token == ".":
+                continue
+            if ".." in token:
+                return f"path escape not allowed in bounded mode: {token!r}"
+            if token.startswith("/"):
+                return f"absolute paths not allowed in bounded mode: {token!r}"
+
+        return None
+
+    def run(self, args: Dict[str, Any]) -> str:
+        cmd = args.get("command")
+        timeout = int(args.get("timeout", 30))
+        if not cmd:
+            return "Error: missing required argument 'command'"
+
+        validation_error = self._validate_bounded_command(cmd)
+        if validation_error:
+            return f"Error: {validation_error}"
+
+        try:
+            argv = shlex.split(cmd)
+            proc = subprocess.run(
+                argv,
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=str(self.cwd_path),
             )
         except subprocess.TimeoutExpired:
             return f"Error: command timed out ({timeout} s)"
@@ -423,7 +515,7 @@ def make_bounded_tools(root: Path, protected_paths: Optional[List[Path]] = None)
     _protected = {p.resolve() for p in (protected_paths or [])}
     return [
         ReadTool(root=root),
-        BashTool(cwd=root),
+        BoundedBashTool(cwd=root),
         EditTool(root=root, protected_paths=_protected),
         WriteTool(root=root, protected_paths=_protected),
     ]
@@ -443,7 +535,14 @@ def _count_tokens(text: str) -> int:
 
 
 def _count_message_tokens(messages: List[Dict[str, Any]]) -> int:
-    return sum(_count_tokens(m.get("content") or "") for m in messages)
+    total = 0
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str):
+            total += _count_tokens(content)
+        elif isinstance(content, list):
+            total += _count_tokens(json.dumps(content, ensure_ascii=False))
+    return total
 
 
 def _fmt_args(name: str, args: Dict[str, Any]) -> str:
@@ -487,6 +586,70 @@ def _fmt_result(name: str, output: str) -> str:
         n = int(m.group(1)) if m else 0
         return f"{n} edit{'s' if n != 1 else ''}"
     return (output.splitlines()[0][:40]) if output else "(empty)"
+
+
+def _validate_schema_value(schema: Dict[str, Any], value: Any, path: str = "args") -> Optional[str]:
+    expected_type = schema.get("type")
+
+    if expected_type == "object":
+        if not isinstance(value, dict):
+            return f"{path} must be an object"
+        props = schema.get("properties", {})
+        required = schema.get("required", [])
+        for key in required:
+            if key not in value:
+                return f"missing required argument {key!r}"
+        if schema.get("additionalProperties") is False:
+            extras = [k for k in value if k not in props]
+            if extras:
+                return f"unexpected argument(s): {', '.join(repr(k) for k in extras)}"
+        for key, item in value.items():
+            if key in props:
+                err = _validate_schema_value(props[key], item, f"{path}.{key}")
+                if err:
+                    return err
+        return None
+
+    if expected_type == "array":
+        if not isinstance(value, list):
+            return f"{path} must be an array"
+        min_items = schema.get("minItems")
+        if min_items is not None and len(value) < min_items:
+            return f"{path} must contain at least {min_items} item(s)"
+        item_schema = schema.get("items")
+        if item_schema:
+            for idx, item in enumerate(value):
+                err = _validate_schema_value(item_schema, item, f"{path}[{idx}]")
+                if err:
+                    return err
+        return None
+
+    if expected_type == "string":
+        if not isinstance(value, str):
+            return f"{path} must be a string"
+        return None
+
+    if expected_type == "integer":
+        if isinstance(value, bool) or not isinstance(value, int):
+            return f"{path} must be an integer"
+        minimum = schema.get("minimum")
+        if minimum is not None and value < minimum:
+            return f"{path} must be >= {minimum}"
+        return None
+
+    return None
+
+
+def _truncate_for_model(text: str, max_chars: int = 4000) -> str:
+    if len(text) <= max_chars:
+        return text
+    head = max_chars // 2
+    tail = max_chars - head
+    return (
+        text[:head]
+        + f"\n\n...[truncated {len(text) - max_chars} chars]...\n\n"
+        + text[-tail:]
+    )
 
 
 class Agent:
@@ -534,6 +697,9 @@ class Agent:
             return f"Error: tool {name!r} is disabled"
         if not isinstance(args, dict):
             return f"Error: tool {name!r} arguments must be an object"
+        err = _validate_schema_value(tool.parameters, args)
+        if err:
+            return f"Error: {err}"
         return tool.run(args)
 
     @staticmethod
@@ -559,6 +725,47 @@ class Agent:
 
     def _print_thinking(self, iteration: int, response: str) -> None:
         print(f"  iter {iteration}")
+
+    def _run_native_tools(
+        self,
+        task: str,
+        system: str = "",
+        chat_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> str:
+        messages: List[Dict[str, Any]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        if chat_history:
+            messages.extend(chat_history)
+        messages.append({"role": "user", "content": task})
+
+        for iteration in range(self.max_iterations):
+            response = self.model.chat_with_tools(messages, self._tool_schemas())
+            text = (response.get("text") or "").strip()
+            tool_calls = response.get("tool_calls") or []
+
+            if self.show_thinking:
+                self._print_thinking(iteration + 1, text)
+
+            if tool_calls:
+                outputs: List[str] = []
+                for call in tool_calls:
+                    call_name = call.get("name", "")
+                    call_args = call.get("arguments", {})
+                    if self.show_thinking:
+                        args_preview = _fmt_args(call_name, call_args)
+                        print(f"    ▸ {call_name:<5}  {args_preview:<60}", end="", flush=True)
+                    output = self._execute(call_name, call_args)
+                    outputs.append(_truncate_for_model(output))
+                    if self.show_thinking:
+                        print(f"  {_fmt_result(call_name, output)}")
+                messages.extend(self.model.format_tool_result_messages(tool_calls, outputs))
+                continue
+
+            if text:
+                return text
+
+        return f"[Agent stopped: max_iterations={self.max_iterations} reached without a final answer]"
 
     def _run_text_protocol(
         self,
@@ -615,7 +822,10 @@ class Agent:
 
                     result_blocks.append(
                         "<tool_result>\n"
-                        + json.dumps({"name": call_name, "output": output}, ensure_ascii=False)
+                        + json.dumps(
+                            {"name": call_name, "output": _truncate_for_model(output)},
+                            ensure_ascii=False,
+                        )
                         + "\n</tool_result>"
                     )
 
@@ -677,4 +887,6 @@ class Agent:
         chat_history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """Run the agent on a task and return its final answer."""
+        if getattr(self.model, "supports_native_tools", False) and hasattr(self.model, "chat_with_tools"):
+            return self._run_native_tools(task=task, system=system, chat_history=chat_history)
         return self._run_text_protocol(task=task, system=system, chat_history=chat_history)
