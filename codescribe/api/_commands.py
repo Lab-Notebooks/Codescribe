@@ -122,22 +122,20 @@ def agent(
 
 
 def loop(
-    spec_file: Path,
-    validation_file: Path,
+    task_file: Path,
     model: Union[Path, str],
-    max_rounds: int = 5,
+    max_loops: int = 5,
     agent_iterations: int = 12,
     show_thinking: bool = False,
     workdir: Union[Path, None] = None,
 ) -> str:
     """
-    API command for running the execution/repair loop
+    API command for running the ralph loop
     """
     return lib.prompt_loop(
-        spec_file=spec_file,
-        validation_file=validation_file,
+        task_file=task_file,
         model=model,
-        max_rounds=max_rounds,
+        max_loops=max_loops,
         agent_iterations=agent_iterations,
         show_thinking=show_thinking,
         workdir=workdir,

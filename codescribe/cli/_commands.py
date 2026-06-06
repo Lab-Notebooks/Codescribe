@@ -331,8 +331,7 @@ def agent(
 
 
 @code_scribe.command(name="loop")
-@click.argument("spec-file", required=True, type=click.Path(exists=True))
-@click.argument("validation-file", required=True, type=click.Path(exists=True))
+@click.argument("task-file", required=True, type=click.Path(exists=True))
 @click.option(
     "--model",
     "-m",
@@ -341,11 +340,11 @@ def agent(
     help="Gen AI model name or path",
 )
 @click.option(
-    "--max-rounds",
+    "--max-loops",
     "-n",
     default=5,
     show_default=True,
-    help="Maximum number of execution/repair rounds",
+    help="Maximum number of ralph agent loops",
 )
 @click.option(
     "--agent-iterations",
@@ -357,7 +356,7 @@ def agent(
     "--workdir",
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
     default=None,
-    help="Working directory bound for both agents; defaults to the current directory",
+    help="Working directory bound for the agent; defaults to the current directory",
 )
 @click.option(
     "--show-thinking",
@@ -366,30 +365,28 @@ def agent(
     help="Print each agent iteration's reasoning and tool calls to stdout",
 )
 def loop(
-    spec_file: Path,
-    validation_file: Path,
+    task_file: Path,
     model: Union[str, Path],
-    max_rounds: int,
+    max_loops: int,
     agent_iterations: int,
     workdir: Union[str, None],
     show_thinking: bool,
 ) -> None:
     """
     \b
-    Run an execution/repair agent loop
+    Run a ralph agent loop
     \b
 
     \b
-    This command runs a validation agent and a repair agent in fresh
-    sessions across multiple rounds. Persistent state is inferred only
-    from files in the working directory.
+    Each loop runs a fresh agent session that reads the task file,
+    picks the single most important next task, executes it, updates
+    the file, and exits. State is inferred only from files.
     \b
     """
     result = api.loop(
-        spec_file=Path(spec_file),
-        validation_file=Path(validation_file),
+        task_file=Path(task_file),
         model=model,
-        max_rounds=max_rounds,
+        max_loops=max_loops,
         agent_iterations=agent_iterations,
         show_thinking=show_thinking,
         workdir=Path(workdir) if workdir else None,

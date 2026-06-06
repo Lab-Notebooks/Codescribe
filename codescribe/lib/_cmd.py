@@ -1,5 +1,5 @@
 import re
-import os, json
+import os, json, textwrap
 
 from typing import List, Dict, Union, Optional, Any
 from pathlib import Path
@@ -434,8 +434,7 @@ def _loop_paths(workdir: Path) -> Dict[str, Path]:
     return {
         "dir": loop_dir,
         "status": loop_dir / "status.json",
-        "execution_report": loop_dir / "execution_report.md",
-        "repair_report": loop_dir / "repair_report.md",
+        "report": loop_dir / "report.md",
     }
 
 
@@ -446,163 +445,89 @@ def _write_loop_status(path: Path, payload: Dict[str, Any]) -> None:
 
 
 def prompt_loop(
-    spec_file: Union[Path, str],
-    validation_file: Union[Path, str],
+    task_file: Union[Path, str],
     model: Union[Path, str],
-    max_rounds: int = 5,
+    max_loops: int = 5,
     agent_iterations: int = 12,
     show_thinking: bool = False,
     workdir: Optional[Union[Path, str]] = None,
 ) -> str:
     """
-    Run a fresh-context execution/repair loop using two separate agents.
-
-    Each round creates a new execution agent session and, if needed, a new repair
-    agent session. No chat history is preserved across rounds; persistent state is
-    inferred only from files in the working directory.
+    Run a ralph-style loop: one fresh agent session per loop receives the task file
+    contents directly, picks the single most important pending task, executes it,
+    and exits. Each agent session is bounded to agent_iterations tool-call iterations.
+    No state is carried between loops; everything is inferred from files.
     """
     workdir_path = Path(workdir).resolve() if workdir else Path.cwd().resolve()
-    spec_path = _ensure_within_workdir(Path(spec_file), workdir_path)
-    validation_path = _ensure_within_workdir(Path(validation_file), workdir_path)
+    task_path = _ensure_within_workdir(Path(task_file), workdir_path)
 
     neural_model = _set_neural_model(model)
-    tools = lib.make_bounded_tools(workdir_path)
+    tools = lib.make_bounded_tools(workdir_path, protected_paths=[task_path])
     paths = _loop_paths(workdir_path)
     os.makedirs(paths["dir"], exist_ok=True)
 
-    spec_rel = spec_path.relative_to(workdir_path)
-    validation_rel = validation_path.relative_to(workdir_path)
-    status_rel = paths["status"].relative_to(workdir_path)
-    execution_report_rel = paths["execution_report"].relative_to(workdir_path)
-    repair_report_rel = paths["repair_report"].relative_to(workdir_path)
+    task_rel = task_path.relative_to(workdir_path)
+    report_rel = paths["report"].relative_to(workdir_path)
 
-    execution_system = (
-        "You are the execution and validation agent.\n"
-        "Your job is to assess whether the current workspace satisfies the "
-        "specification and validation procedure.\n"
-        "You must not modify product/source files. You may only inspect files and run "
-        "validation commands. You may write only the execution status/report files.\n"
-        "Never read from, write to, or rely on any path above the working directory.\n"
-        "Treat every session as fresh. Infer project state only from files and command output.\n"
+    system = (
+        "You are an autonomous coding agent. Treat every session as fresh. "
+        "Infer all project state from files and command output within the working directory. "
+        "IMPORTANT: Only access files and paths within the working directory. "
+        "In bash commands, only use relative paths or paths under the working directory — "
+        "never run find, ls, cat, or any command targeting system directories or paths outside it."
     )
 
-    repair_system = (
-        "You are the repair agent.\n"
-        "Your job is to modify the workspace so it satisfies the specification and passes "
-        "the validation procedure.\n"
-        "Use the specification, validation file, and latest execution report to guide fixes.\n"
-        "Never read from, write to, or rely on any path above the working directory.\n"
-        "Treat every session as fresh. Infer project state only from files and command output.\n"
-        "Do not assume prior conversation context.\n"
-    )
-
-    for round_idx in range(1, max_rounds + 1):
+    for loop_idx in range(1, max_loops + 1):
         _write_loop_status(
             paths["status"],
-            {
-                "round": round_idx,
-                "state": "execution",
-                "passed": False,
-            },
+            {"loop": loop_idx, "state": "running", "summary": ""},
         )
 
         if show_thinking:
-            print(f"\n▶  round {round_idx}  [execution]")
+            print(f"\n▶  loop {loop_idx}")
 
-        execution_agent = lib.Agent(
+        try:
+            task_content = task_path.read_text(errors="replace")
+        except Exception as exc:
+            task_content = f"(could not read task file: {exc})"
+
+        ralph = lib.Agent(
             neural_model,
             tools=tools,
             max_iterations=agent_iterations,
             show_thinking=show_thinking,
         )
 
-        execution_task = f"""
-Working directory: {workdir_path}
+        final_answer = ralph.run(
+            textwrap.dedent(f"""
+                Working directory: {workdir_path}
 
-Specification file: {spec_rel}
-Validation file: {validation_rel}
+                Below is the content of the task file ({task_rel}):
 
-Run the validation procedure for the current workspace.
+                <task_file>
+                {task_content}
+                </task_file>
 
-Rules:
-- You may inspect files and run shell commands needed for validation.
-- Do not modify project source/product files.
-- You may write only these files:
-  - {execution_report_rel}
-  - {status_rel}
-- Write a concise human-readable validation report to {execution_report_rel}.
-- Write JSON to {status_rel} with this schema:
-  {{"round": {round_idx}, "state": "execution_complete", "passed": <true|false>, "summary": "<short summary>"}}
-- If validation passes, set "passed" to true.
-- If validation fails, set "passed" to false and include the most important failures in the summary.
-- Finish with a <final_answer> that states PASS or FAIL.
-""".strip()
+                Pick the single most important pending task from the task file above.
 
-        execution_result = execution_agent.run(execution_task, system=execution_system)
+                IMPORTANT:
+                - Do exactly one task, then stop.
+                - Only access files within the working directory. Use relative paths in bash.
+                - Do NOT modify {task_rel} — it is read-only input.
+                - Write a concise human-readable session report to {report_rel}.
+                - Finish with a <final_answer> briefly describing what you did.
+            """).strip(),
+            system=system,
+        )
 
-        with open(paths["status"], "r") as fh:
-            status = json.load(fh)
-
-        if status.get("passed") is True:
-            if show_thinking:
-                print(f"  ✓  pass\n")
-            return f"✓  passed after {round_idx} round(s)  —  report: {paths['execution_report']}"
+        summary = (final_answer or "").replace("\n", " ").strip()[:120]
+        _write_loop_status(
+            paths["status"],
+            {"loop": loop_idx, "state": "complete", "summary": summary},
+        )
 
         if show_thinking:
-            summary = status.get("summary", "")
             detail = f"  {summary[:65]}" if summary else ""
-            print(f"  ✗  fail{detail}\n")
+            print(f"  ↩  session complete{detail}\n")
 
-        _write_loop_status(
-            paths["status"],
-            {
-                "round": round_idx,
-                "state": "repair",
-                "passed": False,
-            },
-        )
-
-        if show_thinking:
-            print(f"▶  round {round_idx}  [repair]")
-
-        repair_agent = lib.Agent(
-            neural_model,
-            tools=tools,
-            max_iterations=agent_iterations,
-            show_thinking=show_thinking,
-        )
-
-        repair_task = f"""
-Working directory: {workdir_path}
-
-Specification file: {spec_rel}
-Validation file: {validation_rel}
-Latest execution report: {execution_report_rel}
-Status file: {status_rel}
-
-Repair the workspace so it satisfies the specification and passes validation.
-
-Rules:
-- You may read and modify files only within the working directory.
-- Use the spec file, validation file, and execution report as the source of truth.
-- Write a concise human-readable repair summary to {repair_report_rel}.
-- Do not rely on any previous chat context; infer everything from files.
-- Finish with a <final_answer> that summarizes what you changed.
-""".strip()
-
-        repair_result = repair_agent.run(repair_task, system=repair_system)
-
-        if show_thinking:
-            print(f"  ↩  repair complete\n")
-
-        _write_loop_status(
-            paths["status"],
-            {
-                "round": round_idx,
-                "state": "repair_complete",
-                "passed": False,
-                "summary": repair_result,
-            },
-        )
-
-    return f"✗  stopped after {max_rounds} round(s) without success  —  report: {paths['execution_report']}"
+    return f"completed {max_loops} loop(s)  —  report: {paths['report']}"

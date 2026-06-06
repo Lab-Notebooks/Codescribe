@@ -40,6 +40,8 @@ You can inspect files, run shell commands, edit files precisely, and write files
 IMPORTANT: You MUST use tools to perform any action. Never describe what you would do —
 actually execute it by calling the appropriate tool. Do not fabricate file contents,
 command output, or any other results.
+Before reading a file, verify the path exists first (e.g. bash `test -f <path> && echo exists`).
+Do not attempt to read a path you have not confirmed exists.
 
 Available tools:
 {tool_list}
@@ -68,10 +70,6 @@ __all__ = [
     "BashTool",
     "EditTool",
     "WriteTool",
-    "BoundedReadTool",
-    "BoundedBashTool",
-    "BoundedEditTool",
-    "BoundedWriteTool",
     "make_bounded_tools",
     "DEFAULT_TOOLS",
     "Agent",
@@ -114,10 +112,13 @@ class AgentTool:
 
 
 class ReadTool(AgentTool):
-    def __init__(self) -> None:
+    def __init__(self, root: Optional[Path] = None) -> None:
+        desc = "Read a text file. Supports optional 1-indexed offset and line limit."
+        if root is not None:
+            desc += " Access is restricted to the working directory tree."
         super().__init__(
             name="read",
-            description="Read a text file. Supports optional 1-indexed offset and line limit.",
+            description=desc,
             parameters={
                 "type": "object",
                 "properties": {
@@ -138,6 +139,7 @@ class ReadTool(AgentTool):
             },
             enabled=True,
         )
+        self.root = Path(root).resolve() if root is not None else None
 
     def run(self, args: Dict[str, Any]) -> str:
         path = args.get("path")
@@ -146,6 +148,13 @@ class ReadTool(AgentTool):
 
         if not path:
             return "Error: missing required argument 'path'"
+
+        if self.root is not None:
+            try:
+                path = str(_resolve_within_root(self.root, path))
+            except Exception as exc:
+                return f"Error: {exc}"
+
         if not os.path.exists(path):
             return f"Error: file not found: {path}"
         if not os.path.isfile(path):
@@ -167,10 +176,17 @@ class ReadTool(AgentTool):
 
 
 class BashTool(AgentTool):
-    def __init__(self) -> None:
+    def __init__(self, cwd: Optional[Path] = None) -> None:
+        desc = "Execute a bash command in the current working directory."
+        if cwd is not None:
+            desc += (
+                " Commands execute with the working directory set to the bounded root."
+                " Only access files and paths within the working directory;"
+                " do not navigate to or read from paths outside it."
+            )
         super().__init__(
             name="bash",
-            description="Execute a bash command in the current working directory.",
+            description=desc,
             parameters={
                 "type": "object",
                 "properties": {
@@ -186,6 +202,7 @@ class BashTool(AgentTool):
             },
             enabled=True,
         )
+        self.cwd = str(Path(cwd).resolve()) if cwd is not None else None
 
     def run(self, args: Dict[str, Any]) -> str:
         cmd = args.get("command")
@@ -200,6 +217,7 @@ class BashTool(AgentTool):
                 capture_output=True,
                 text=True,
                 timeout=timeout,
+                cwd=self.cwd,
             )
         except subprocess.TimeoutExpired:
             return f"Error: command timed out ({timeout} s)"
@@ -219,14 +237,21 @@ class BashTool(AgentTool):
 
 
 class EditTool(AgentTool):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        root: Optional[Path] = None,
+        protected_paths: Optional[set] = None,
+    ) -> None:
+        desc = (
+            "Edit a file using exact text replacement. "
+            "Provide path and edits:[{oldText,newText}, ...]. "
+            "Each oldText must match the original file exactly."
+        )
+        if root is not None:
+            desc += " Access is restricted to the working directory tree."
         super().__init__(
             name="edit",
-            description=(
-                "Edit a file using exact text replacement. "
-                "Provide path and edits:[{oldText,newText}, ...]. "
-                "Each oldText must match the original file exactly."
-            ),
+            description=desc,
             parameters={
                 "type": "object",
                 "properties": {
@@ -251,6 +276,8 @@ class EditTool(AgentTool):
             },
             enabled=True,
         )
+        self.root = Path(root).resolve() if root is not None else None
+        self.protected_paths: set = protected_paths or set()
 
     def run(self, args: Dict[str, Any]) -> str:
         path = args.get("path")
@@ -260,6 +287,15 @@ class EditTool(AgentTool):
             return "Error: missing required argument 'path'"
         if not isinstance(edits, list) or not edits:
             return "Error: 'edits' must be a non-empty list"
+
+        if self.root is not None:
+            try:
+                path = str(_resolve_within_root(self.root, path))
+            except Exception as exc:
+                return f"Error: {exc}"
+        if self.protected_paths and Path(path).resolve() in self.protected_paths:
+            return f"Error: {args.get('path')!r} is read-only and cannot be edited"
+
         if not os.path.exists(path):
             return f"Error: file not found: {path}"
         if not os.path.isfile(path):
@@ -315,10 +351,17 @@ class EditTool(AgentTool):
 
 
 class WriteTool(AgentTool):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        root: Optional[Path] = None,
+        protected_paths: Optional[set] = None,
+    ) -> None:
+        desc = "Create or overwrite a file with the provided content."
+        if root is not None:
+            desc += " Access is restricted to the working directory tree."
         super().__init__(
             name="write",
-            description="Create or overwrite a file with the provided content.",
+            description=desc,
             parameters={
                 "type": "object",
                 "properties": {
@@ -330,6 +373,8 @@ class WriteTool(AgentTool):
             },
             enabled=True,
         )
+        self.root = Path(root).resolve() if root is not None else None
+        self.protected_paths: set = protected_paths or set()
 
     def run(self, args: Dict[str, Any]) -> str:
         path = args.get("path")
@@ -338,6 +383,14 @@ class WriteTool(AgentTool):
             return "Error: missing required argument 'path'"
         if content is None:
             return "Error: missing required argument 'content'"
+
+        if self.root is not None:
+            try:
+                path = str(_resolve_within_root(self.root, path))
+            except Exception as exc:
+                return f"Error: {exc}"
+        if self.protected_paths and Path(path).resolve() in self.protected_paths:
+            return f"Error: {args.get('path')!r} is read-only and cannot be written"
 
         try:
             parent = os.path.dirname(path)
@@ -366,100 +419,13 @@ def _resolve_within_root(root: Path, target: str) -> Path:
     return candidate
 
 
-class BoundedReadTool(ReadTool):
-    def __init__(self, root: Path) -> None:
-        super().__init__()
-        self.root = Path(root).resolve()
-        self.description += " Access is restricted to the working directory tree."
-
-    def run(self, args: Dict[str, Any]) -> str:
-        try:
-            path = str(_resolve_within_root(self.root, args.get("path")))
-        except Exception as exc:
-            return f"Error: {exc}"
-        bounded_args = dict(args)
-        bounded_args["path"] = path
-        return super().run(bounded_args)
-
-
-class BoundedEditTool(EditTool):
-    def __init__(self, root: Path) -> None:
-        super().__init__()
-        self.root = Path(root).resolve()
-        self.description += " Access is restricted to the working directory tree."
-
-    def run(self, args: Dict[str, Any]) -> str:
-        try:
-            path = str(_resolve_within_root(self.root, args.get("path")))
-        except Exception as exc:
-            return f"Error: {exc}"
-        bounded_args = dict(args)
-        bounded_args["path"] = path
-        return super().run(bounded_args)
-
-
-class BoundedWriteTool(WriteTool):
-    def __init__(self, root: Path) -> None:
-        super().__init__()
-        self.root = Path(root).resolve()
-        self.description += " Access is restricted to the working directory tree."
-
-    def run(self, args: Dict[str, Any]) -> str:
-        try:
-            path = str(_resolve_within_root(self.root, args.get("path")))
-        except Exception as exc:
-            return f"Error: {exc}"
-        bounded_args = dict(args)
-        bounded_args["path"] = path
-        return super().run(bounded_args)
-
-
-class BoundedBashTool(BashTool):
-    def __init__(self, root: Path) -> None:
-        super().__init__()
-        self.root = Path(root).resolve()
-        self.description += (
-            " Commands execute with the working directory set to the bounded root."
-        )
-
-    def run(self, args: Dict[str, Any]) -> str:
-        cmd = args.get("command")
-        timeout = int(args.get("timeout", 30))
-        if not cmd:
-            return "Error: missing required argument 'command'"
-
-        try:
-            proc = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=str(self.root),
-            )
-        except subprocess.TimeoutExpired:
-            return f"Error: command timed out ({timeout} s)"
-        except Exception as exc:
-            return f"Error: {exc}"
-
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
-        parts = [f"exit_code: {proc.returncode}"]
-        if stdout.strip():
-            parts.append(f"STDOUT:\n{stdout.rstrip()}")
-        if stderr.strip():
-            parts.append(f"STDERR:\n{stderr.rstrip()}")
-        if len(parts) == 1:
-            parts.append("(no output)")
-        return "\n\n".join(parts)
-
-
-def make_bounded_tools(root: Path) -> List[AgentTool]:
+def make_bounded_tools(root: Path, protected_paths: Optional[List[Path]] = None) -> List[AgentTool]:
+    _protected = {p.resolve() for p in (protected_paths or [])}
     return [
-        BoundedReadTool(root),
-        BoundedBashTool(root),
-        BoundedEditTool(root),
-        BoundedWriteTool(root),
+        ReadTool(root=root),
+        BashTool(cwd=root),
+        EditTool(root=root, protected_paths=_protected),
+        WriteTool(root=root, protected_paths=_protected),
     ]
 
 
@@ -469,6 +435,15 @@ DEFAULT_TOOLS: List[AgentTool] = [
     EditTool(),
     WriteTool(),
 ]
+
+
+def _count_tokens(text: str) -> int:
+    """Estimate token count from raw text (~4 chars per token)."""
+    return max(1, (len(text) + 3) // 4)
+
+
+def _count_message_tokens(messages: List[Dict[str, Any]]) -> int:
+    return sum(_count_tokens(m.get("content") or "") for m in messages)
 
 
 def _fmt_args(name: str, args: Dict[str, Any]) -> str:
@@ -600,9 +575,15 @@ class Agent:
 
         tool_calls_ever_made = False
         final_without_tools_pushed = False
+        current_context_tokens = _count_message_tokens(messages)
+        total_input_tokens = 0
+        total_output_tokens = 0
 
         for iteration in range(self.max_iterations):
+            # Full context is sent on every call; accumulate before calling.
+            total_input_tokens += current_context_tokens
             response = self.model.chat(messages)
+            total_output_tokens += _count_tokens(response)
 
             if self.show_thinking:
                 self._print_thinking(iteration + 1, response)
@@ -613,6 +594,7 @@ class Agent:
             if tool_calls:
                 tool_calls_ever_made = True
                 messages.append({"role": "assistant", "content": response})
+                current_context_tokens += _count_tokens(response)
 
                 result_blocks: List[str] = []
                 for call in tool_calls:
@@ -637,7 +619,9 @@ class Agent:
                         + "\n</tool_result>"
                     )
 
-                messages.append({"role": "user", "content": "\n".join(result_blocks)})
+                tool_results_text = "\n".join(result_blocks)
+                messages.append({"role": "user", "content": tool_results_text})
+                current_context_tokens += _count_tokens(tool_results_text)
                 continue
 
             final = self._parse_final_answer(response)
@@ -646,33 +630,44 @@ class Agent:
                     # Model jumped straight to <final_answer> without calling any tools.
                     # Give it one opportunity to actually use tools before accepting.
                     final_without_tools_pushed = True
+                    nudge = (
+                        "You emitted <final_answer> without calling any tools. "
+                        "If this task requires creating files, running commands, or "
+                        "reading files, use <tool_call> blocks to actually perform "
+                        "those actions — do not simulate results. "
+                        "Only emit <final_answer> after all required tool calls are complete."
+                    )
                     messages.append({"role": "assistant", "content": response})
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "You emitted <final_answer> without calling any tools. "
-                            "If this task requires creating files, running commands, or "
-                            "reading files, use <tool_call> blocks to actually perform "
-                            "those actions — do not simulate results. "
-                            "Only emit <final_answer> after all required tool calls are complete."
-                        ),
-                    })
+                    messages.append({"role": "user", "content": nudge})
+                    current_context_tokens += _count_tokens(response) + _count_tokens(nudge)
                     continue
                 if self.show_thinking:
                     print()
+                    total = total_input_tokens + total_output_tokens
+                    print(
+                        f"  tokens  in {total_input_tokens:,}  "
+                        f"out {total_output_tokens:,}  "
+                        f"total {total:,}"
+                    )
                 return final
 
             # No tool calls and no final answer: push back.
+            nudge = (
+                "You must use a <tool_call> block to take any action, "
+                "or wrap your final response in <final_answer> tags. "
+                "Do not describe actions — execute them via tools."
+            )
             messages.append({"role": "assistant", "content": response})
-            messages.append({
-                "role": "user",
-                "content": (
-                    "You must use a <tool_call> block to take any action, "
-                    "or wrap your final response in <final_answer> tags. "
-                    "Do not describe actions — execute them via tools."
-                ),
-            })
+            messages.append({"role": "user", "content": nudge})
+            current_context_tokens += _count_tokens(response) + _count_tokens(nudge)
 
+        if self.show_thinking:
+            total = total_input_tokens + total_output_tokens
+            print(
+                f"  tokens  in {total_input_tokens:,}  "
+                f"out {total_output_tokens:,}  "
+                f"total {total:,}"
+            )
         return f"[Agent stopped: max_iterations={self.max_iterations} reached without a final answer]"
 
     def run(
