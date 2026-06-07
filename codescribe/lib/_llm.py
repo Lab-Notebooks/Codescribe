@@ -25,6 +25,7 @@ class OpenAICompModel:
         self.pipeline = openai.OpenAI(api_key=self.apikey, base_url=self.baseurl)
         self.outputs = 1
         self.max_tokens = 16384
+        self.last_usage = None
 
     @property
     def supports_native_tools(self) -> bool:
@@ -37,6 +38,7 @@ class OpenAICompModel:
             max_tokens=self.max_tokens,
             n=self.outputs,
         )
+        self.last_usage = _normalize_openai_usage(getattr(response, "usage", None))
 
         return response.choices[0].message.content
 
@@ -48,7 +50,8 @@ class OpenAICompModel:
             max_tokens=self.max_tokens,
             n=self.outputs,
         )
-        return _normalize_openai_tool_response(response.choices[0].message)
+        self.last_usage = _normalize_openai_usage(getattr(response, "usage", None))
+        return _normalize_openai_tool_response(response.choices[0].message, self.last_usage)
 
     def format_tool_result_messages(self, tool_calls: List[Dict[str, Any]], outputs: List[str]) -> List[Dict[str, Any]]:
         assistant_tool_calls = []
@@ -92,6 +95,7 @@ class OpenAIModel:
         self.outputs = 1
         self.max_tokens = 16384
         self.model = model
+        self.last_usage = None
 
     @property
     def supports_native_tools(self) -> bool:
@@ -104,6 +108,7 @@ class OpenAIModel:
             max_tokens=self.max_tokens,
             n=self.outputs,
         )
+        self.last_usage = _normalize_openai_usage(getattr(response, "usage", None))
 
         return response.choices[0].message.content
 
@@ -115,7 +120,8 @@ class OpenAIModel:
             max_tokens=self.max_tokens,
             n=self.outputs,
         )
-        return _normalize_openai_tool_response(response.choices[0].message)
+        self.last_usage = _normalize_openai_usage(getattr(response, "usage", None))
+        return _normalize_openai_tool_response(response.choices[0].message, self.last_usage)
 
     def format_tool_result_messages(self, tool_calls: List[Dict[str, Any]], outputs: List[str]) -> List[Dict[str, Any]]:
         assistant_tool_calls = []
@@ -321,7 +327,7 @@ class TFModel:
         return f"TFModel(model={self.config.model_type}, max_new_tokens={self.max_new_tokens}, batch_size={self.batch_size}, max_length={self.max_length})"
 
 
-def _normalize_openai_tool_response(message: Any) -> Dict[str, Any]:
+def _normalize_openai_tool_response(message: Any, usage: Any = None) -> Dict[str, Any]:
     text = message.content or ""
     tool_calls = []
     for call in getattr(message, "tool_calls", []) or []:
@@ -337,7 +343,33 @@ def _normalize_openai_tool_response(message: Any) -> Dict[str, Any]:
                 "arguments": arguments,
             }
         )
-    return {"text": text, "tool_calls": tool_calls}
+    return {"text": text, "tool_calls": tool_calls, "usage": _normalize_openai_usage(usage)}
+
+
+def _normalize_openai_usage(usage: Any) -> Any:
+    if usage is None:
+        return None
+    if isinstance(usage, dict):
+        return usage
+
+    normalized = {}
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+    ):
+        value = getattr(usage, key, None)
+        if value is not None:
+            normalized[key] = value
+
+    if not normalized and hasattr(usage, "model_dump"):
+        return usage.model_dump()
+    if not normalized and hasattr(usage, "dict"):
+        return usage.dict()
+    return normalized or None
 
 
 def _openai_tool_to_anthropic_tool(tool: Dict[str, Any]) -> Dict[str, Any]:

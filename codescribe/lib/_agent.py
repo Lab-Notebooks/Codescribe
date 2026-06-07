@@ -7,7 +7,7 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Text fallback tool protocol
@@ -545,6 +545,18 @@ def _count_message_tokens(messages: List[Dict[str, Any]]) -> int:
     return total
 
 
+def _usage_in_out(usage: Optional[Dict[str, Any]]) -> Tuple[int, int]:
+    if not usage:
+        return 0, 0
+    input_tokens = usage.get("prompt_tokens")
+    if input_tokens is None:
+        input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("completion_tokens")
+    if output_tokens is None:
+        output_tokens = usage.get("output_tokens", 0)
+    return int(input_tokens or 0), int(output_tokens or 0)
+
+
 def _fmt_args(name: str, args: Dict[str, Any]) -> str:
     """Short human-readable preview of tool arguments."""
     if name == "bash":
@@ -739,13 +751,32 @@ class Agent:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": task})
 
+        total_input_tokens = 0
+        total_output_tokens = 0
+
         for iteration in range(self.max_iterations):
             response = self.model.chat_with_tools(messages, self._tool_schemas())
             text = (response.get("text") or "").strip()
             tool_calls = response.get("tool_calls") or []
+            usage = response.get("usage") or getattr(self.model, "last_usage", None)
+            input_tokens, output_tokens = _usage_in_out(usage)
+            if usage:
+                total_input_tokens += input_tokens
+                total_output_tokens += output_tokens
+            else:
+                total_input_tokens += _count_message_tokens(messages)
+                output_text = text
+                if not output_text and tool_calls:
+                    output_text = json.dumps(tool_calls, ensure_ascii=False)
+                total_output_tokens += _count_tokens(output_text) if output_text else 0
 
             if self.show_thinking:
                 self._print_thinking(iteration + 1, text)
+                print(
+                    f"    usage  in {input_tokens:,}  "
+                    f"out {output_tokens:,}  "
+                    f"total {input_tokens + output_tokens:,}"
+                )
 
             if tool_calls:
                 outputs: List[str] = []
@@ -763,8 +794,23 @@ class Agent:
                 continue
 
             if text:
+                if self.show_thinking:
+                    print()
+                    total = total_input_tokens + total_output_tokens
+                    print(
+                        f"  tokens  in {total_input_tokens:,}  "
+                        f"out {total_output_tokens:,}  "
+                        f"total {total:,}"
+                    )
                 return text
 
+        if self.show_thinking:
+            total = total_input_tokens + total_output_tokens
+            print(
+                f"  tokens  in {total_input_tokens:,}  "
+                f"out {total_output_tokens:,}  "
+                f"total {total:,}"
+            )
         return f"[Agent stopped: max_iterations={self.max_iterations} reached without a final answer]"
 
     def _run_text_protocol(
