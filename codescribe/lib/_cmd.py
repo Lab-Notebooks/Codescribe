@@ -419,6 +419,7 @@ def prompt_agent(
         tools=tools if tools is not None else lib.DEFAULT_TOOLS,
         max_iterations=max_iterations,
         show_thinking=show_thinking,
+        tool_output_max_chars=None,
     )
     return coding_agent.run(task, system=system)
 

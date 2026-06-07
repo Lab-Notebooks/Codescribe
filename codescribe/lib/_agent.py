@@ -642,16 +642,80 @@ def _validate_schema_value(schema: Dict[str, Any], value: Any, path: str = "args
     return None
 
 
-def _truncate_for_model(text: str, max_chars: int = 4000) -> str:
+def _truncate_for_model(text: str, max_chars: Optional[int] = 4000) -> str:
+    """Compact tool output to fit within a model context budget.
+
+    If max_chars is None or <= 0, truncation is disabled.
+
+    This prefers line-aware compaction (keep head/tail lines) and falls back
+    to character slicing for extremely long single-line outputs.
+    """
+
+    if max_chars is None or max_chars <= 0:
+        return text
     if len(text) <= max_chars:
         return text
-    head = max_chars // 2
-    tail = max_chars - head
-    return (
-        text[:head]
-        + f"\n\n...[truncated {len(text) - max_chars} chars]...\n\n"
-        + text[-tail:]
-    )
+
+    # Normalize newlines so line accounting is stable.
+    text_n = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # If it's essentially a single line (or very few), do a head/tail char slice.
+    if text_n.count("\n") <= 1:
+        head = max_chars // 2
+        tail = max_chars - head
+        omitted = len(text_n) - max_chars
+        return (
+            text_n[:head]
+            + f"\n\n...[truncated {omitted} chars]...\n\n"
+            + text_n[-tail:]
+        )
+
+    lines = text_n.split("\n")
+    total_lines = len(lines)
+
+    # Budget for the marker line and surrounding newlines.
+    marker_template = "...[truncated {omitted_lines} lines / {omitted_chars} chars]..."
+
+    # Start with a reasonable split, then adjust to fit.
+    head_lines = max(5, min(200, total_lines // 4))
+    tail_lines = max(5, min(200, total_lines // 4))
+
+    def render(h: int, t: int) -> str:
+        h = max(0, min(h, total_lines))
+        t = max(0, min(t, total_lines - h))
+        head_part = "\n".join(lines[:h])
+        tail_part = "\n".join(lines[-t:]) if t else ""
+        kept = head_part + ("\n" if head_part and (tail_part or True) else "") + tail_part
+        omitted_lines = max(0, total_lines - (h + t))
+        omitted_chars = max(0, len(text_n) - len(head_part) - len(tail_part))
+        marker = marker_template.format(omitted_lines=omitted_lines, omitted_chars=omitted_chars)
+        if tail_part:
+            return head_part + "\n\n" + marker + "\n\n" + tail_part
+        return head_part + "\n\n" + marker
+
+    out = render(head_lines, tail_lines)
+
+    # Shrink until within budget.
+    # Prefer shrinking tail first (often repetitive), then head.
+    while len(out) > max_chars and (head_lines > 1 or tail_lines > 1):
+        if tail_lines > 1:
+            tail_lines = max(1, int(tail_lines * 0.8))
+        elif head_lines > 1:
+            head_lines = max(1, int(head_lines * 0.8))
+        out = render(head_lines, tail_lines)
+
+    # If still too large (e.g., gigantic lines), fall back to safe char slicing.
+    if len(out) > max_chars:
+        head = max_chars // 2
+        tail = max_chars - head
+        omitted = len(text_n) - max_chars
+        return (
+            text_n[:head]
+            + f"\n\n...[truncated {omitted} chars]...\n\n"
+            + text_n[-tail:]
+        )
+
+    return out
 
 
 class Agent:
@@ -663,12 +727,14 @@ class Agent:
         tools: Optional[List[AgentTool]] = None,
         max_iterations: int = 20,
         show_thinking: bool = False,
+        tool_output_max_chars: Optional[int] = 4000,
     ) -> None:
         self.model = model
         source = tools if tools is not None else DEFAULT_TOOLS
         self._tools: Dict[str, AgentTool] = {t.name: copy.copy(t) for t in source}
         self.max_iterations = max_iterations
         self.show_thinking = show_thinking
+        self.tool_output_max_chars = tool_output_max_chars
 
     def enable_tool(self, name: str) -> None:
         if name not in self._tools:
@@ -777,7 +843,7 @@ class Agent:
                         args_preview = _fmt_args(call_name, call_args)
                         print(f"    ▸ {call_name:<5}  {args_preview:<60}", end="", flush=True)
                     output = self._execute(call_name, call_args)
-                    outputs.append(_truncate_for_model(output))
+                    outputs.append(_truncate_for_model(output, self.tool_output_max_chars))
                     if self.show_thinking:
                         print(f"  {_fmt_result(call_name, output)}")
                 messages.extend(self.model.format_tool_result_messages(tool_calls, outputs))
@@ -859,7 +925,10 @@ class Agent:
                     result_blocks.append(
                         "<tool_result>\n"
                         + json.dumps(
-                            {"name": call_name, "output": _truncate_for_model(output)},
+                            {
+                                "name": call_name,
+                                "output": _truncate_for_model(output, self.tool_output_max_chars),
+                            },
                             ensure_ascii=False,
                         )
                         + "\n</tool_result>"
