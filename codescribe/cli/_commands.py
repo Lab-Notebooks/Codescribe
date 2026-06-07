@@ -229,11 +229,18 @@ def update(
     help="Save file specific prompts to json file",
     mutually_exclusive=["model"],
 )
+@click.option(
+    "--show-thinking",
+    "-v",
+    is_flag=True,
+    help="Print each agent iteration's reasoning and tool calls to stdout",
+)
 def inspect(
     fortran_files: List[Path],
     query_prompt: str,
     model: Union[str, Path],
     save_prompts: bool,
+    show_thinking: bool,
 ) -> None:
     """
     \b
@@ -241,8 +248,8 @@ def inspect(
     \b
 
     \b
-    This command applies generative AI to inspect a list of
-    files and answer a query. Results may vary based
+    This command uses the agent in bounded read-only mode to inspect
+    a list of files and answer a query. Results may vary based
     on the the combination of files
     \b
     """
@@ -258,6 +265,7 @@ def inspect(
         query_prompt,
         model,
         save_prompts,
+        show_thinking,
     )
 
 
@@ -344,7 +352,7 @@ def agent(
     "-n",
     default=5,
     show_default=True,
-    help="Maximum number of ralph agent loops",
+    help="Maximum number of bounded agent loops",
 )
 @click.option(
     "--agent-iterations",
@@ -374,13 +382,13 @@ def loop(
 ) -> None:
     """
     \b
-    Run a ralph agent loop
+    Run a bounded agent loop
     \b
 
     \b
     Each loop runs a fresh agent session that reads the task file,
-    picks the single most important next task, executes it, updates
-    the file, and exits. State is inferred only from files.
+    picks the single most important next task, executes it, writes
+    a session report, and exits. State is inferred only from files.
     \b
     """
     result = api.loop(

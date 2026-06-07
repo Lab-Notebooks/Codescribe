@@ -174,13 +174,38 @@ class ReadTool(AgentTool):
 
 
 class BashTool(AgentTool):
-    def __init__(self, cwd: Optional[Path] = None) -> None:
+    _BLOCKED_CHARS = set("|&;><`$\\")
+    _DEFAULT_ALLOWED = {
+        "ls",
+        "pwd",
+        "find",
+        "grep",
+        "head",
+        "tail",
+        "wc",
+        "git",
+        "test",
+        "echo",
+        "sed",
+    }
+
+    def __init__(
+        self,
+        cwd: Optional[Path] = None,
+        bounded: bool = False,
+        allowed_commands: Optional[set] = None,
+    ) -> None:
         desc = "Execute a bash command in the current working directory."
         if cwd is not None:
             desc += (
                 " Commands execute with the working directory set to the bounded root."
                 " Only access files and paths within the working directory;"
                 " do not navigate to or read from paths outside it."
+            )
+        if bounded:
+            desc += (
+                " In bounded mode, commands are validated before execution, shell metacharacters"
+                " are rejected, and only a small allowlist of commands is permitted."
             )
         super().__init__(
             name="bash",
@@ -201,65 +226,9 @@ class BashTool(AgentTool):
             enabled=True,
         )
         self.cwd = str(Path(cwd).resolve()) if cwd is not None else None
-
-    def run(self, args: Dict[str, Any]) -> str:
-        cmd = args.get("command")
-        timeout = int(args.get("timeout", 30))
-        if not cmd:
-            return "Error: missing required argument 'command'"
-
-        try:
-            proc = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=self.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return f"Error: command timed out ({timeout} s)"
-        except Exception as exc:
-            return f"Error: {exc}"
-
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
-        parts = [f"exit_code: {proc.returncode}"]
-        if stdout.strip():
-            parts.append(f"STDOUT:\n{stdout.rstrip()}")
-        if stderr.strip():
-            parts.append(f"STDERR:\n{stderr.rstrip()}")
-        if len(parts) == 1:
-            parts.append("(no output)")
-        return "\n\n".join(parts)
-
-
-class BoundedBashTool(BashTool):
-    """Safer bash variant for bounded mode."""
-
-    _BLOCKED_CHARS = set("|&;><`$\\")
-    _DEFAULT_ALLOWED = {
-        "ls",
-        "pwd",
-        "find",
-        "grep",
-        "head",
-        "tail",
-        "wc",
-        "git",
-        "test",
-        "echo",
-        "sed",
-    }
-
-    def __init__(self, cwd: Path, allowed_commands: Optional[set] = None) -> None:
-        super().__init__(cwd=cwd)
-        self.cwd_path = Path(cwd).resolve()
+        self.cwd_path = Path(cwd).resolve() if cwd is not None else None
+        self.bounded = bounded
         self.allowed_commands = allowed_commands or set(self._DEFAULT_ALLOWED)
-        self.description += (
-            " In bounded mode, commands are validated before execution, shell metacharacters"
-            " are rejected, and only a small allowlist of commands is permitted."
-        )
 
     def _validate_bounded_command(self, cmd: str) -> Optional[str]:
         if any(ch in cmd for ch in self._BLOCKED_CHARS):
@@ -291,31 +260,7 @@ class BoundedBashTool(BashTool):
 
         return None
 
-    def run(self, args: Dict[str, Any]) -> str:
-        cmd = args.get("command")
-        timeout = int(args.get("timeout", 30))
-        if not cmd:
-            return "Error: missing required argument 'command'"
-
-        validation_error = self._validate_bounded_command(cmd)
-        if validation_error:
-            return f"Error: {validation_error}"
-
-        try:
-            argv = shlex.split(cmd)
-            proc = subprocess.run(
-                argv,
-                shell=False,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=str(self.cwd_path),
-            )
-        except subprocess.TimeoutExpired:
-            return f"Error: command timed out ({timeout} s)"
-        except Exception as exc:
-            return f"Error: {exc}"
-
+    def _format_result(self, proc: subprocess.CompletedProcess) -> str:
         stdout = proc.stdout or ""
         stderr = proc.stderr or ""
         parts = [f"exit_code: {proc.returncode}"]
@@ -326,6 +271,41 @@ class BoundedBashTool(BashTool):
         if len(parts) == 1:
             parts.append("(no output)")
         return "\n\n".join(parts)
+
+    def run(self, args: Dict[str, Any]) -> str:
+        cmd = args.get("command")
+        timeout = int(args.get("timeout", 30))
+        if not cmd:
+            return "Error: missing required argument 'command'"
+
+        try:
+            if self.bounded:
+                validation_error = self._validate_bounded_command(cmd)
+                if validation_error:
+                    return f"Error: {validation_error}"
+                proc = subprocess.run(
+                    shlex.split(cmd),
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    cwd=str(self.cwd_path) if self.cwd_path is not None else None,
+                )
+            else:
+                proc = subprocess.run(
+                    cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    cwd=self.cwd,
+                )
+        except subprocess.TimeoutExpired:
+            return f"Error: command timed out ({timeout} s)"
+        except Exception as exc:
+            return f"Error: {exc}"
+
+        return self._format_result(proc)
 
 
 class EditTool(AgentTool):
@@ -511,14 +491,24 @@ def _resolve_within_root(root: Path, target: str) -> Path:
     return candidate
 
 
-def make_bounded_tools(root: Path, protected_paths: Optional[List[Path]] = None) -> List[AgentTool]:
-    _protected = {p.resolve() for p in (protected_paths or [])}
-    return [
+def make_bounded_tools(
+    root: Path,
+    protected_paths: Optional[List[Path]] = None,
+    allow_write: bool = True,
+) -> List[AgentTool]:
+    tools: List[AgentTool] = [
         ReadTool(root=root),
-        BoundedBashTool(cwd=root),
-        EditTool(root=root, protected_paths=_protected),
-        WriteTool(root=root, protected_paths=_protected),
+        BashTool(cwd=root, bounded=True),
     ]
+    if allow_write:
+        _protected = {p.resolve() for p in (protected_paths or [])}
+        tools.extend(
+            [
+                EditTool(root=root, protected_paths=_protected),
+                WriteTool(root=root, protected_paths=_protected),
+            ]
+        )
+    return tools
 
 
 DEFAULT_TOOLS: List[AgentTool] = [

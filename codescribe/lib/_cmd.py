@@ -144,70 +144,74 @@ def prompt_inspect(
     file_index: Dict[str, str] = {},
     model: Union[Path, str] = None,
     save_prompts: bool = False,
+    show_thinking: bool = False,
 ) -> None:
-    """Perform inspection on a list of files using a query prompt."""
-    neural_model = None
+    """Perform inspection on a list of files using the agent in bounded read-only mode."""
+    if not model:
+        raise ValueError("prompt_inspect requires a model when running in agent mode")
 
-    if model:
-        print("Performing neural inspection")
-        neural_model = _set_neural_model(model)
+    print("Performing agent-based inspection")
+    neural_model = _set_neural_model(model)
 
-    if save_prompts:
-        print("Saving prompts to scribe.json")
+    resolved_files = [Path(f).resolve() for f in filelist]
+    if not resolved_files:
+        raise ValueError("prompt_inspect requires at least one file")
 
-    chat_template = [{"role": "system", "content": ""}]
-
-    chat_template[-1]["content"] += (
-        "You are a coding assistant.\n"
-        + "The user will provide source code from a set of files that\n"
-        + "belong to a scientific computing codebase. Understand the\n"
-        + "source code and answer a query that follows.\n"
-        + "Source code for each file will be separated using\n"
-        + "elements <filename> ... </filename>. Additional\n"
-        + "information related to the project structure may also be\n"
-        + "provided within <index> ... </index>. This information will\n"
-        + "contain an index of subroutines, functions, and modules contained\n"
-        + "in each file. Note that you will find subroutines and functions\n"
-        + "repeated along nodes in the directory tree. This may be due to a directory-based\n"
-        + "inheritance design implemented by the project. If the index element is not\n"
-        + "present, then you may ignore it. The query prompt will be provided at the end\n"
-        + "using elements <query> ... </query>.\n\n"
-    )
-
-    chat_template.append({"role": "user", "content": ""})
+    common_root = Path(os.path.commonpath([str(path.parent) for path in resolved_files])).resolve()
+    rel_files = [str(path.relative_to(common_root)) for path in resolved_files]
 
     filtered_file_index = {}
-    for fsource in filelist:
-
+    for fsource in resolved_files:
         if file_index:
             filtered_file_index.update(lib.filter_file_indexes(fsource, file_index))
 
-        with open(fsource, "r") as sfile:
-            source_code = []
+    system = (
+        "You are a coding assistant performing code inspection in bounded read-only mode. "
+        "Use the available tools to inspect the requested files and answer the query. "
+        "Do not claim to have read files unless you actually read them with tools. "
+        "Do not modify files or simulate command output. "
+        "Only access paths within the bounded working directory and prefer the listed files."
+    )
 
-            for line in sfile.readlines():
-                source_code.append(line)
-
-        if source_code:
-            chat_template[-1]["content"] += (
-                "\n" + f"<{fsource}>\n" + "".join(source_code) + f"</{fsource}>\n"
-            )
+    task = "Inspect the following files and answer the query.\n\n"
+    task += "Files to inspect:\n"
+    for path in rel_files:
+        task += f"- {path}\n"
 
     if filtered_file_index:
-        chat_template[-1]["content"] += "<index>\n"
+        task += "\nProject index:\n"
         for construct, file_path in filtered_file_index.items():
-            chat_template[-1]["content"] += f"{construct}: {file_path}\n"
-        chat_template[-1]["content"] += "</index>\n\n"
+            task += f"- {construct}: {file_path}\n"
 
-    chat_template[-1]["content"] += "\n" + f"<query>\n" + query_prompt + f"\n</query>\n"
+    task += "\nQuery:\n"
+    task += query_prompt + "\n\n"
+    task += (
+        "Use read and bounded bash as needed, then finish with <final_answer> containing the answer."
+    )
 
     if save_prompts:
+        print("Saving prompts to scribe.json")
         with open("scribe.json", "w") as pdest:
-            json.dump(chat_template, pdest, indent=4)
+            json.dump(
+                {
+                    "mode": "agent_inspect",
+                    "workdir": str(common_root),
+                    "system": system,
+                    "task": task,
+                    "files": rel_files,
+                },
+                pdest,
+                indent=4,
+            )
 
-    if neural_model:
-        result = neural_model.chat(chat_template)
-        print(result)
+    coding_agent = lib.Agent(
+        neural_model,
+        tools=lib.make_bounded_tools(common_root, allow_write=False),
+        max_iterations=20,
+        show_thinking=show_thinking,
+    )
+    result = coding_agent.run(task, system=system)
+    print(result)
 
 
 def prompt_generate(
@@ -410,13 +414,13 @@ def prompt_agent(
     to stdout as the agent works.
     """
     neural_model = _set_neural_model(model)
-    agent = lib.Agent(
+    coding_agent = lib.Agent(
         neural_model,
         tools=tools if tools is not None else lib.DEFAULT_TOOLS,
         max_iterations=max_iterations,
         show_thinking=show_thinking,
     )
-    return agent.run(task, system=system)
+    return coding_agent.run(task, system=system)
 
 
 def _ensure_within_workdir(path: Path, workdir: Path) -> Path:
@@ -453,7 +457,7 @@ def prompt_loop(
     workdir: Optional[Union[Path, str]] = None,
 ) -> str:
     """
-    Run a ralph-style loop: one fresh agent session per loop receives the task file
+    Run a bounded loop: one fresh agent session per loop receives the task file
     contents directly, picks the single most important pending task, executes it,
     and exits. Each agent session is bounded to agent_iterations tool-call iterations.
     No state is carried between loops; everything is inferred from files.
@@ -491,14 +495,14 @@ def prompt_loop(
         except Exception as exc:
             task_content = f"(could not read task file: {exc})"
 
-        ralph = lib.Agent(
+        bounded_agent = lib.Agent(
             neural_model,
             tools=tools,
             max_iterations=agent_iterations,
             show_thinking=show_thinking,
         )
 
-        final_answer = ralph.run(
+        final_answer = bounded_agent.run(
             textwrap.dedent(f"""
                 Working directory: {workdir_path}
 

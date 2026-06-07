@@ -45,13 +45,19 @@ def inspect(
     query_prompt: str,
     model: Union[Path, str],
     save_prompts: bool = False,
+    show_thinking: bool = False,
 ) -> None:
     """
     API command for inspecting files
     """
     file_index = {}  # lib.create_file_indexes()
     lib.prompt_inspect(
-        filelist, query_prompt, file_index, model=model, save_prompts=save_prompts
+        filelist,
+        query_prompt,
+        file_index,
+        model=model,
+        save_prompts=save_prompts,
+        show_thinking=show_thinking,
     )
 
 
@@ -130,7 +136,7 @@ def loop(
     workdir: Union[Path, None] = None,
 ) -> str:
     """
-    API command for running the ralph loop
+    API command for running the bounded loop
     """
     return lib.prompt_loop(
         task_file=task_file,

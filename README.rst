@@ -246,9 +246,9 @@ Following is a brief overview of different commands:
    ``<final_answer>`` blocks.
 
 #. ``code-scribe loop <task_file> -m <model_name_or_path>``: Run a
-   repeated bounded loop in which each session starts fresh, reads the
-   task file, performs exactly one important pending task, writes a
-   concise report, and exits. Loop status is written under
+   bounded loop in which each session starts fresh, reads the task
+   file, performs exactly one important pending task, writes a concise
+   report, and exits. Loop status is written under
    ``.codescribe/loop/``.
 
 ***************
@@ -265,6 +265,9 @@ prompt-driven translation and generation commands.
    - ``bash``: run shell commands
    - ``edit``: perform exact-text replacements in files
    - ``write``: create or overwrite files
+   - ``grep``: search for text patterns in files
+   - ``find``: locate files under the working tree
+   - ``ls``: list files and directories
 
 #. **Loop mode** runs multiple fresh agent sessions over a task file.
    Each session is intentionally stateless and must infer project state
