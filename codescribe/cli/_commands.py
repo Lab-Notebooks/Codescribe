@@ -318,12 +318,31 @@ def format(seed_prompt_list: List[Path]) -> None:
     is_flag=True,
     help="Print agent diagnostics (per-iteration reasoning and tool calls) to stdout",
 )
+@click.option(
+    "--log",
+    "log_enabled",
+    is_flag=True,
+    help=(
+        "Write agent diagnostics events (JSONL) to the default path: "
+        ".codescribe/diagnostics/agent.jsonl."
+    ),
+)
+@click.option(
+    "--log-path",
+    "log_path",
+    required=False,
+    default=None,
+    type=click.Path(dir_okay=True, file_okay=True, writable=True),
+    help="Write agent diagnostics events (JSONL) to PATH (implies --log).",
+)
 def agent(
     task: str,
     model: Union[str, Path],
     system: str,
     agent_iterations: int,
     verbose: bool,
+    log_enabled: bool,
+    log_path: Union[str, None],
 ) -> None:
     """
     \b
@@ -336,12 +355,20 @@ def agent(
     Available tools: read, bash, edit, write, grep, find, ls
     \b
     """
+    effective_log = None
+    if log_path is not None:
+        effective_log = log_path
+    elif log_enabled:
+        # Empty string means "use default log path" in JsonlDiagnosticsSink.
+        effective_log = ""
+
     result = api.agent(
         task,
         model,
         system=system,
         agent_iterations=agent_iterations,
         verbose=verbose,
+        log=effective_log,
     )
     click.echo(result)
 
@@ -382,6 +409,23 @@ def agent(
     is_flag=True,
     help="Print agent diagnostics (per-iteration reasoning and tool calls) to stdout",
 )
+@click.option(
+    "--log",
+    "log_enabled",
+    is_flag=True,
+    help=(
+        "Write agent diagnostics events (JSONL) to the default path: "
+        ".codescribe/diagnostics/agent.jsonl."
+    ),
+)
+@click.option(
+    "--log-path",
+    "log_path",
+    required=False,
+    default=None,
+    type=click.Path(dir_okay=True, file_okay=True, writable=True),
+    help="Write agent diagnostics events (JSONL) to PATH (implies --log).",
+)
 def loop(
     task_file: Path,
     model: Union[str, Path],
@@ -389,6 +433,8 @@ def loop(
     agent_iterations: int,
     workdir: Union[str, None],
     verbose: bool,
+    log_enabled: bool,
+    log_path: Union[str, None],
 ) -> None:
     """
     \b
@@ -401,12 +447,20 @@ def loop(
     a session report, and exits. State is inferred only from files.
     \b
     """
+    effective_log = None
+    if log_path is not None:
+        effective_log = log_path
+    elif log_enabled:
+        # Empty string means "use default log path" in JsonlDiagnosticsSink.
+        effective_log = ""
+
     result = api.loop(
         task_file=Path(task_file),
         model=model,
         agent_loops=agent_loops,
         agent_iterations=agent_iterations,
         verbose=verbose,
+        log=effective_log,
         workdir=Path(workdir) if workdir else None,
     )
     click.echo(result)

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from codescribe import lib
+from codescribe.lib._diagnostics import NullDiagnosticsSink, Timer, new_run_id
 
 # ---------------------------------------------------------------------------
 # Text fallback tool protocol
@@ -745,6 +746,7 @@ class Agent:
         max_iterations: int = 20,
         show_diagnostics: bool = False,
         tool_output_max_chars: Optional[int] = 4000,
+        diagnostics: Optional[Any] = None,
     ) -> None:
 
         if not isinstance(model, lib.ALLOWED_MODEL_TYPES):
@@ -759,6 +761,9 @@ class Agent:
         self.max_iterations = max_iterations
         self.show_diagnostics = show_diagnostics
         self.tool_output_max_chars = tool_output_max_chars
+
+        # Diagnostics sink (JSONL recommended). Must expose .emit(dict).
+        self.diagnostics = diagnostics if diagnostics is not None else NullDiagnosticsSink()
 
     def enable_tool(self, name: str) -> None:
         if name not in self._tools:
@@ -781,18 +786,75 @@ class Agent:
     def _tool_schemas(self) -> List[Dict[str, Any]]:
         return [tool.to_openai_tool() for tool in self._enabled_tools()]
 
-    def _execute(self, name: str, args: Dict[str, Any]) -> str:
+    def _execute(self, name: str, args: Dict[str, Any], *, run_id: Optional[str] = None, iteration: Optional[int] = None) -> str:
+        t = Timer()
+        ok = True
+        error: Optional[str] = None
+        output: str
+
         if name not in self._tools:
-            return f"Error: unknown tool {name!r}"
-        tool = self._tools[name]
-        if not tool.enabled:
-            return f"Error: tool {name!r} is disabled"
-        if not isinstance(args, dict):
-            return f"Error: tool {name!r} arguments must be an object"
-        err = _validate_schema_value(tool.parameters, args)
-        if err:
-            return f"Error: {err}"
-        return tool.run(args)
+            ok = False
+            error = f"unknown tool {name!r}"
+            output = f"Error: {error}"
+        else:
+            tool = self._tools[name]
+            if not tool.enabled:
+                ok = False
+                error = f"tool {name!r} is disabled"
+                output = f"Error: {error}"
+            elif not isinstance(args, dict):
+                ok = False
+                error = f"tool {name!r} arguments must be an object"
+                output = f"Error: {error}"
+            else:
+                err = _validate_schema_value(tool.parameters, args)
+                if err:
+                    ok = False
+                    error = err
+                    output = f"Error: {err}"
+                else:
+                    try:
+                        self.diagnostics.emit(
+                            {
+                                "event": "tool_start",
+                                "run_id": run_id,
+                                "iteration": iteration,
+                                "tool": name,
+                                "args": args,
+                            }
+                        )
+                    except Exception:
+                        pass
+
+                    try:
+                        output = tool.run(args)
+                    except Exception as exc:
+                        ok = False
+                        error = repr(exc)
+                        output = f"Error: {exc}"
+
+        truncated = False
+        if self.tool_output_max_chars is not None and self.tool_output_max_chars > 0:
+            truncated = len(output) > self.tool_output_max_chars
+
+        try:
+            self.diagnostics.emit(
+                {
+                    "event": "tool_end",
+                    "run_id": run_id,
+                    "iteration": iteration,
+                    "tool": name,
+                    "ok": ok,
+                    "error": error,
+                    "duration_ms": round(t.ms, 3),
+                    "output_chars": len(output),
+                    "output_truncated": truncated,
+                }
+            )
+        except Exception:
+            pass
+
+        return output
 
     @staticmethod
     def _parse_tool_calls(text: str) -> List[Dict[str, Any]]:
@@ -841,7 +903,32 @@ class Agent:
 
         empty_reply_nudged = False
 
+        run_id = new_run_id()
+        try:
+            self.diagnostics.emit(
+                {
+                    "event": "run_start",
+                    "run_id": run_id,
+                    "mode": "native_tools",
+                    "max_iterations": self.max_iterations,
+                }
+            )
+        except Exception:
+            pass
+
         for iteration in range(self.max_iterations):
+            try:
+                self.diagnostics.emit(
+                    {
+                        "event": "iteration_start",
+                        "run_id": run_id,
+                        "iteration": iteration + 1,
+                    }
+                )
+            except Exception:
+                pass
+
+            model_timer = Timer()
             response = self.model.chat_with_tools(messages, self._tool_schemas())
             text = (response.get("text") or "").strip()
             tool_calls = response.get("tool_calls") or []
@@ -865,6 +952,21 @@ class Agent:
                     f"total {input_tokens + output_tokens:,}"
                 )
 
+            try:
+                self.diagnostics.emit(
+                    {
+                        "event": "model_response",
+                        "run_id": run_id,
+                        "iteration": iteration + 1,
+                        "duration_ms": round(model_timer.ms, 3),
+                        "text_chars": len(text),
+                        "tool_calls": len(tool_calls),
+                        "usage": usage,
+                    }
+                )
+            except Exception:
+                pass
+
             # ReAct rule: if tool calls exist, execute them even if some text is also present.
             if tool_calls:
                 outputs: List[str] = []
@@ -874,11 +976,23 @@ class Agent:
                     if self.show_diagnostics:
                         args_preview = _fmt_args(call_name, call_args)
                         print(f"    ▸ {call_name:<5}  {args_preview:<60}", end="", flush=True)
-                    output = self._execute(call_name, call_args)
+                    output = self._execute(call_name, call_args, run_id=run_id, iteration=iteration + 1)
                     outputs.append(_truncate_for_model(output, self.tool_output_max_chars))
                     if self.show_diagnostics:
                         print(f"  {_fmt_result(call_name, output)}")
                 messages.extend(self.model.format_tool_result_messages(tool_calls, outputs))
+
+                try:
+                    self.diagnostics.emit(
+                        {
+                            "event": "iteration_end",
+                            "run_id": run_id,
+                            "iteration": iteration + 1,
+                            "stop_reason": "tool_calls",
+                        }
+                    )
+                except Exception:
+                    pass
                 continue
 
             if text:
@@ -890,6 +1004,20 @@ class Agent:
                         f"out {total_output_tokens:,}  "
                         f"total {total:,}"
                     )
+
+                try:
+                    self.diagnostics.emit(
+                        {
+                            "event": "run_end",
+                            "run_id": run_id,
+                            "iteration": iteration + 1,
+                            "stop_reason": "final_text",
+                            "total_input_tokens": total_input_tokens,
+                            "total_output_tokens": total_output_tokens,
+                        }
+                    )
+                except Exception:
+                    pass
                 return text
 
             # Degenerate turn: neither tool calls nor usable text.
@@ -910,6 +1038,21 @@ class Agent:
                 f"out {total_output_tokens:,}  "
                 f"total {total:,}"
             )
+
+        try:
+            self.diagnostics.emit(
+                {
+                    "event": "run_end",
+                    "run_id": run_id,
+                    "iteration": self.max_iterations,
+                    "stop_reason": "max_iterations",
+                    "total_input_tokens": total_input_tokens,
+                    "total_output_tokens": total_output_tokens,
+                }
+            )
+        except Exception:
+            pass
+
         return f"[Agent stopped: max_iterations={self.max_iterations} reached without a final answer]"
 
     def _run_text_protocol(
@@ -925,6 +1068,19 @@ class Agent:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": task})
 
+        run_id = new_run_id()
+        try:
+            self.diagnostics.emit(
+                {
+                    "event": "run_start",
+                    "run_id": run_id,
+                    "mode": "text_protocol",
+                    "max_iterations": self.max_iterations,
+                }
+            )
+        except Exception:
+            pass
+
         tool_calls_ever_made = False
         final_without_tools_pushed = False
         current_context_tokens = _count_message_tokens(messages)
@@ -932,10 +1088,35 @@ class Agent:
         total_output_tokens = 0
 
         for iteration in range(self.max_iterations):
+            try:
+                self.diagnostics.emit(
+                    {
+                        "event": "iteration_start",
+                        "run_id": run_id,
+                        "iteration": iteration + 1,
+                    }
+                )
+            except Exception:
+                pass
             # Full context is sent on every call; accumulate before calling.
             total_input_tokens += current_context_tokens
+            model_timer = Timer()
             response = self.model.chat(messages)
             total_output_tokens += _count_tokens(response)
+
+            try:
+                self.diagnostics.emit(
+                    {
+                        "event": "model_response",
+                        "run_id": run_id,
+                        "iteration": iteration + 1,
+                        "duration_ms": round(model_timer.ms, 3),
+                        "text_chars": len(response or ""),
+                        "usage": getattr(self.model, "last_usage", None),
+                    }
+                )
+            except Exception:
+                pass
 
             if self.show_diagnostics:
                 print(f"  iter {iteration + 1}")
@@ -961,7 +1142,7 @@ class Agent:
                         if self.show_diagnostics:
                             args_preview = _fmt_args(call_name, call_args)
                             print(f"    ▸ {call_name:<5}  {args_preview:<60}", end="", flush=True)
-                        output = self._execute(call_name, call_args)
+                        output = self._execute(call_name, call_args, run_id=run_id, iteration=iteration + 1)
                         if self.show_diagnostics:
                             print(f"  {_fmt_result(call_name, output)}")
 
@@ -980,6 +1161,19 @@ class Agent:
                 tool_results_text = "\n".join(result_blocks)
                 messages.append({"role": "user", "content": tool_results_text})
                 current_context_tokens += _count_tokens(tool_results_text)
+
+                try:
+                    self.diagnostics.emit(
+                        {
+                            "event": "iteration_end",
+                            "run_id": run_id,
+                            "iteration": iteration + 1,
+                            "stop_reason": "tool_calls",
+                        }
+                    )
+                except Exception:
+                    pass
+
                 continue
 
             final = self._parse_final_answer(response)
@@ -1007,6 +1201,20 @@ class Agent:
                         f"out {total_output_tokens:,}  "
                         f"total {total:,}"
                     )
+                try:
+                    self.diagnostics.emit(
+                        {
+                            "event": "run_end",
+                            "run_id": run_id,
+                            "iteration": iteration + 1,
+                            "stop_reason": "final_answer",
+                            "total_input_tokens": total_input_tokens,
+                            "total_output_tokens": total_output_tokens,
+                        }
+                    )
+                except Exception:
+                    pass
+
                 return final
 
             # No tool calls and no final answer: push back.
@@ -1026,6 +1234,21 @@ class Agent:
                 f"out {total_output_tokens:,}  "
                 f"total {total:,}"
             )
+
+        try:
+            self.diagnostics.emit(
+                {
+                    "event": "run_end",
+                    "run_id": run_id,
+                    "iteration": self.max_iterations,
+                    "stop_reason": "max_iterations",
+                    "total_input_tokens": total_input_tokens,
+                    "total_output_tokens": total_output_tokens,
+                }
+            )
+        except Exception:
+            pass
+
         return f"[Agent stopped: max_iterations={self.max_iterations} reached without a final answer]"
 
     def run(

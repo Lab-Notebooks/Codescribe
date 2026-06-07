@@ -114,6 +114,7 @@ def agent(
     system: str = "",
     agent_iterations: int = 20,
     verbose: bool = False,
+    log: Union[Path, str, None] = None,
 ) -> str:
     """
     API command for running the agentic loop on a task
@@ -124,6 +125,7 @@ def agent(
         system=system,
         agent_iterations=agent_iterations,
         verbose=verbose,
+        log=log,
     )
 
 
@@ -133,6 +135,7 @@ def loop(
     agent_loops: int = 5,
     agent_iterations: int = 12,
     verbose: bool = False,
+    log: Union[Path, str, None] = None,
     workdir: Union[Path, None] = None,
 ) -> str:
     """
@@ -144,5 +147,6 @@ def loop(
         agent_loops=agent_loops,
         agent_iterations=agent_iterations,
         verbose=verbose,
+        log=log,
         workdir=workdir,
     )
