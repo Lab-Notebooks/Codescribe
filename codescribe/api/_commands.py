@@ -45,7 +45,7 @@ def inspect(
     query_prompt: str,
     model: Union[Path, str],
     save_prompts: bool = False,
-    show_thinking: bool = False,
+    verbose: bool = False,
 ) -> None:
     """
     API command for inspecting files
@@ -57,7 +57,7 @@ def inspect(
         file_index,
         model=model,
         save_prompts=save_prompts,
-        show_thinking=show_thinking,
+        verbose=verbose,
     )
 
 
@@ -112,8 +112,8 @@ def agent(
     task: str,
     model: Union[Path, str],
     system: str = "",
-    max_iterations: int = 20,
-    show_thinking: bool = False,
+    agent_iterations: int = 20,
+    verbose: bool = False,
 ) -> str:
     """
     API command for running the agentic loop on a task
@@ -122,17 +122,17 @@ def agent(
         task,
         model=model,
         system=system,
-        max_iterations=max_iterations,
-        show_thinking=show_thinking,
+        agent_iterations=agent_iterations,
+        verbose=verbose,
     )
 
 
 def loop(
     task_file: Path,
     model: Union[Path, str],
-    max_loops: int = 5,
+    agent_loops: int = 5,
     agent_iterations: int = 12,
-    show_thinking: bool = False,
+    verbose: bool = False,
     workdir: Union[Path, None] = None,
 ) -> str:
     """
@@ -141,8 +141,8 @@ def loop(
     return lib.prompt_loop(
         task_file=task_file,
         model=model,
-        max_loops=max_loops,
+        agent_loops=agent_loops,
         agent_iterations=agent_iterations,
-        show_thinking=show_thinking,
+        verbose=verbose,
         workdir=workdir,
     )

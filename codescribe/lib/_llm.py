@@ -1,6 +1,6 @@
 import os, importlib, json, requests
 
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Union
 from pathlib import Path
 
 
@@ -259,6 +259,13 @@ class AnthropicModel:
         return f"AnthropicModel(model='{self.model}')"
 
 
+# ---------------------------------------------------------------------------
+# Public model typing / allowlist (used by Agent to reject arbitrary objects)
+# ---------------------------------------------------------------------------
+
+Model = Union["OpenAIModel", "OpenAICompModel", "AnthropicModel", "ArgoModel", "TFModel"]
+
+
 class TFModel:
     def __init__(self, checkpoint_dir: Path) -> None:
         transformers = importlib.import_module("transformers")
@@ -297,6 +304,15 @@ class TFModel:
 
     def __repr__(self) -> str:
         return f"TFModel(model={self.config.model_type}, max_new_tokens={self.max_new_tokens}, batch_size={self.batch_size}, max_length={self.max_length})"
+
+
+ALLOWED_MODEL_TYPES = (
+    OpenAIModel,
+    OpenAICompModel,
+    AnthropicModel,
+    ArgoModel,
+    TFModel,
+)
 
 
 def _normalize_openai_tool_response(message: Any, usage: Any = None) -> Dict[str, Any]:
@@ -401,13 +417,29 @@ def _normalize_anthropic_tool_response(response: Any, usage: Any = None) -> Dict
 def _merge_system_with_user(
     chat_template: List[Dict[str, str]]
 ) -> List[Dict[str, str]]:
-    """Prepend the system message content to the first user message."""
-    if chat_template and chat_template[0]["role"] == "system":
-        system_content = chat_template[0]["content"]
-        for msg in chat_template:
-            if msg["role"] == "user":
-                msg["content"] = system_content + "\n\n" + msg["content"]
-                break
-        chat_template = [msg for msg in chat_template if msg["role"] != "system"]
+    """Return a new chat template with system content prepended to the first user message.
 
-    return chat_template
+    This function does not mutate the caller's message dicts.
+    """
+
+    if not chat_template:
+        return []
+
+    # Work on copies to avoid mutating caller-owned dicts.
+    copied = [dict(m) for m in chat_template]
+
+    if copied[0].get("role") != "system":
+        return copied
+
+    system_content = copied[0].get("content", "")
+    out: List[Dict[str, str]] = []
+    system_applied = False
+
+    for msg in copied[1:]:
+        if (not system_applied) and msg.get("role") == "user":
+            msg["content"] = (system_content + "\n\n" + (msg.get("content") or "")).rstrip()
+            system_applied = True
+        out.append(msg)
+
+    # If there was a system message but no user message, just drop the system.
+    return out

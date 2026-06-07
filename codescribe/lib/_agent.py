@@ -9,6 +9,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from codescribe import lib
+
 # ---------------------------------------------------------------------------
 # Text fallback tool protocol
 # ---------------------------------------------------------------------------
@@ -60,6 +62,21 @@ Your final response here.
 
 CRITICAL: Do NOT emit <final_answer> until all necessary tool calls have been made and confirmed.
 Do not emit tool calls after <final_answer>.
+"""
+
+# ---------------------------------------------------------------------------
+# Native tool-calling (chat_with_tools) ReAct nudge
+# ---------------------------------------------------------------------------
+# Keep this short and non-format-prescriptive: native tool calls are the "Action"
+# and tool result messages are the "Observation".
+_NATIVE_REACT_NUDGE = """\
+You are a coding agent with access to tools.
+
+Rules:
+- Use tools whenever you need to inspect files, run commands, or change the filesystem.
+- Do NOT fabricate tool outputs. If you need info, call a tool.
+- Prefer batching: when possible, call multiple tools in one turn.
+- When you have enough information and all required actions are complete, respond with the final answer as normal text.
 """
 
 __all__ = [
@@ -723,17 +740,24 @@ class Agent:
 
     def __init__(
         self,
-        model: Any,
+        model: lib.Model,
         tools: Optional[List[AgentTool]] = None,
         max_iterations: int = 20,
-        show_thinking: bool = False,
+        show_diagnostics: bool = False,
         tool_output_max_chars: Optional[int] = 4000,
     ) -> None:
+
+        if not isinstance(model, lib.ALLOWED_MODEL_TYPES):
+            allowed = ", ".join(t.__name__ for t in lib.ALLOWED_MODEL_TYPES)
+            raise TypeError(
+                f"Invalid model type: {type(model).__name__}. Expected one of: {allowed}"
+            )
+
         self.model = model
         source = tools if tools is not None else DEFAULT_TOOLS
         self._tools: Dict[str, AgentTool] = {t.name: copy.copy(t) for t in source}
         self.max_iterations = max_iterations
-        self.show_thinking = show_thinking
+        self.show_diagnostics = show_diagnostics
         self.tool_output_max_chars = tool_output_max_chars
 
     def enable_tool(self, name: str) -> None:
@@ -791,8 +815,6 @@ class Agent:
         match = _FINAL_ANSWER_RE.search(text)
         return match.group(1).strip() if match else None
 
-    def _print_thinking(self, iteration: int, response: str) -> None:
-        print(f"  iter {iteration}")
 
     def _run_native_tools(
         self,
@@ -801,14 +823,23 @@ class Agent:
         chat_history: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         messages: List[Dict[str, Any]] = []
+
+        # Native tool-calling ReAct: keep the contract minimal and rely on
+        # tool_calls + tool result messages for Act/Observe.
+        sys_parts = []
         if system:
-            messages.append({"role": "system", "content": system})
+            sys_parts.append(system.strip())
+        sys_parts.append(_NATIVE_REACT_NUDGE.strip())
+        messages.append({"role": "system", "content": "\n\n".join(p for p in sys_parts if p)})
+
         if chat_history:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": task})
 
         total_input_tokens = 0
         total_output_tokens = 0
+
+        empty_reply_nudged = False
 
         for iteration in range(self.max_iterations):
             response = self.model.chat_with_tools(messages, self._tool_schemas())
@@ -826,31 +857,32 @@ class Agent:
                     output_text = json.dumps(tool_calls, ensure_ascii=False)
                 total_output_tokens += _count_tokens(output_text) if output_text else 0
 
-            if self.show_thinking:
-                self._print_thinking(iteration + 1, text)
+            if self.show_diagnostics:
+                print(f"  iter {iteration + 1}")
                 print(
                     f"    usage  in {input_tokens:,}  "
                     f"out {output_tokens:,}  "
                     f"total {input_tokens + output_tokens:,}"
                 )
 
+            # ReAct rule: if tool calls exist, execute them even if some text is also present.
             if tool_calls:
                 outputs: List[str] = []
                 for call in tool_calls:
                     call_name = call.get("name", "")
                     call_args = call.get("arguments", {})
-                    if self.show_thinking:
+                    if self.show_diagnostics:
                         args_preview = _fmt_args(call_name, call_args)
                         print(f"    ▸ {call_name:<5}  {args_preview:<60}", end="", flush=True)
                     output = self._execute(call_name, call_args)
                     outputs.append(_truncate_for_model(output, self.tool_output_max_chars))
-                    if self.show_thinking:
+                    if self.show_diagnostics:
                         print(f"  {_fmt_result(call_name, output)}")
                 messages.extend(self.model.format_tool_result_messages(tool_calls, outputs))
                 continue
 
             if text:
-                if self.show_thinking:
+                if self.show_diagnostics:
                     print()
                     total = total_input_tokens + total_output_tokens
                     print(
@@ -860,7 +892,18 @@ class Agent:
                     )
                 return text
 
-        if self.show_thinking:
+            # Degenerate turn: neither tool calls nor usable text.
+            if not empty_reply_nudged:
+                empty_reply_nudged = True
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "Reply with either tool_calls (to take an action) or a final answer as text.",
+                    }
+                )
+                continue
+
+        if self.show_diagnostics:
             total = total_input_tokens + total_output_tokens
             print(
                 f"  tokens  in {total_input_tokens:,}  "
@@ -894,8 +937,8 @@ class Agent:
             response = self.model.chat(messages)
             total_output_tokens += _count_tokens(response)
 
-            if self.show_thinking:
-                self._print_thinking(iteration + 1, response)
+            if self.show_diagnostics:
+                print(f"  iter {iteration + 1}")
 
             # Check tool calls FIRST. Execute them even if <final_answer> is also
             # present in the same response — the model must not skip tool execution.
@@ -910,16 +953,16 @@ class Agent:
                     if "_parse_error" in call:
                         call_name = "?"
                         output = f"Error parsing tool call: {call['_parse_error']}"
-                        if self.show_thinking:
+                        if self.show_diagnostics:
                             print(f"    ✗ parse error: {call['_parse_error'][:80]}")
                     else:
                         call_name = call.get("name", "")
                         call_args = call.get("args", {})
-                        if self.show_thinking:
+                        if self.show_diagnostics:
                             args_preview = _fmt_args(call_name, call_args)
                             print(f"    ▸ {call_name:<5}  {args_preview:<60}", end="", flush=True)
                         output = self._execute(call_name, call_args)
-                        if self.show_thinking:
+                        if self.show_diagnostics:
                             print(f"  {_fmt_result(call_name, output)}")
 
                     result_blocks.append(
@@ -956,7 +999,7 @@ class Agent:
                     messages.append({"role": "user", "content": nudge})
                     current_context_tokens += _count_tokens(response) + _count_tokens(nudge)
                     continue
-                if self.show_thinking:
+                if self.show_diagnostics:
                     print()
                     total = total_input_tokens + total_output_tokens
                     print(
@@ -976,7 +1019,7 @@ class Agent:
             messages.append({"role": "user", "content": nudge})
             current_context_tokens += _count_tokens(response) + _count_tokens(nudge)
 
-        if self.show_thinking:
+        if self.show_diagnostics:
             total = total_input_tokens + total_output_tokens
             print(
                 f"  tokens  in {total_input_tokens:,}  "

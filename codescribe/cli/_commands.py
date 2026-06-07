@@ -230,17 +230,18 @@ def update(
     mutually_exclusive=["model"],
 )
 @click.option(
-    "--show-thinking",
+    "--verbose",
     "-v",
+    "verbose",
     is_flag=True,
-    help="Print each agent iteration's reasoning and tool calls to stdout",
+    help="Print agent diagnostics (per-iteration reasoning and tool calls) to stdout",
 )
 def inspect(
     fortran_files: List[Path],
     query_prompt: str,
     model: Union[str, Path],
     save_prompts: bool,
-    show_thinking: bool,
+    verbose: bool,
 ) -> None:
     """
     \b
@@ -265,7 +266,7 @@ def inspect(
         query_prompt,
         model,
         save_prompts,
-        show_thinking,
+        verbose=verbose,
     )
 
 
@@ -304,24 +305,25 @@ def format(seed_prompt_list: List[Path]) -> None:
     help="Optional system prompt prepended to the agent instructions",
 )
 @click.option(
-    "--max-iterations",
-    "-n",
+    "--agent-iterations",
+    "-niter",
     default=20,
     show_default=True,
     help="Maximum number of tool-call iterations",
 )
 @click.option(
-    "--show-thinking",
+    "--verbose",
     "-v",
+    "verbose",
     is_flag=True,
-    help="Print each agent iteration's reasoning and tool calls to stdout",
+    help="Print agent diagnostics (per-iteration reasoning and tool calls) to stdout",
 )
 def agent(
     task: str,
     model: Union[str, Path],
     system: str,
-    max_iterations: int,
-    show_thinking: bool,
+    agent_iterations: int,
+    verbose: bool,
 ) -> None:
     """
     \b
@@ -334,7 +336,13 @@ def agent(
     Available tools: read, bash, edit, write, grep, find, ls
     \b
     """
-    result = api.agent(task, model, system=system, max_iterations=max_iterations, show_thinking=show_thinking)
+    result = api.agent(
+        task,
+        model,
+        system=system,
+        agent_iterations=agent_iterations,
+        verbose=verbose,
+    )
     click.echo(result)
 
 
@@ -348,14 +356,15 @@ def agent(
     help="Gen AI model name or path",
 )
 @click.option(
-    "--max-loops",
-    "-n",
+    "--agent-loops",
+    "-nloop",
     default=5,
     show_default=True,
     help="Maximum number of bounded agent loops",
 )
 @click.option(
     "--agent-iterations",
+    "-niter",
     default=12,
     show_default=True,
     help="Maximum tool-call iterations per agent session",
@@ -367,18 +376,19 @@ def agent(
     help="Working directory bound for the agent; defaults to the current directory",
 )
 @click.option(
-    "--show-thinking",
+    "--verbose",
     "-v",
+    "verbose",
     is_flag=True,
-    help="Print each agent iteration's reasoning and tool calls to stdout",
+    help="Print agent diagnostics (per-iteration reasoning and tool calls) to stdout",
 )
 def loop(
     task_file: Path,
     model: Union[str, Path],
-    max_loops: int,
+    agent_loops: int,
     agent_iterations: int,
     workdir: Union[str, None],
-    show_thinking: bool,
+    verbose: bool,
 ) -> None:
     """
     \b
@@ -394,9 +404,9 @@ def loop(
     result = api.loop(
         task_file=Path(task_file),
         model=model,
-        max_loops=max_loops,
+        agent_loops=agent_loops,
         agent_iterations=agent_iterations,
-        show_thinking=show_thinking,
+        verbose=verbose,
         workdir=Path(workdir) if workdir else None,
     )
     click.echo(result)

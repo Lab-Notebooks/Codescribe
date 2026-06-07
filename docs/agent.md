@@ -82,7 +82,7 @@ That principle leads to the main design choices:
 - tools are represented as Python classes,
 - tool arguments are schema-checked before execution,
 - tool output is always fed back into the loop as plain text,
-- the loop is capped by `max_iterations`,
+- the loop is capped by `agent_iterations`,
 - and there are two execution modes depending on backend capability:
   - **native tool calling**, if the model supports it,
   - **text-protocol fallback**, if it does not.
@@ -670,8 +670,8 @@ Constructor inputs are:
 
 - `model`
 - `tools=None`
-- `max_iterations=20`
-- `show_thinking=False`
+- `agent_iterations=20`
+- `show_diagnostics=False`
 
 ### Important design detail: tool copying
 
@@ -792,7 +792,7 @@ The conversation begins with:
 
 ### 27.2 Main loop
 
-For each iteration up to `max_iterations`:
+For each iteration up to `agent_iterations`:
 
 1. call `self.model.chat_with_tools(messages, self._tool_schemas())`,
 2. extract returned text and `tool_calls`,
@@ -915,7 +915,7 @@ All replacements are based on the original file snapshot for that call.
 
 ### Agent loops must terminate
 
-`max_iterations` prevents infinite back-and-forth.
+`agent_iterations` prevents infinite back-and-forth.
 
 These invariants are more important than any individual helper function.
 

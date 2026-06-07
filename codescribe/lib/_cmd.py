@@ -7,7 +7,7 @@ from alive_progress import alive_bar
 
 from codescribe import lib
 
-def _set_neural_model(model: Union[Path, str]) -> object:
+def _set_neural_model(model: Union[Path, str]) -> lib.Model:
     """Instantiate and return the appropriate LLM based on the model string."""
     if os.path.exists(model):
         return lib.TFModel(model)
@@ -144,7 +144,7 @@ def prompt_inspect(
     file_index: Dict[str, str] = {},
     model: Union[Path, str] = None,
     save_prompts: bool = False,
-    show_thinking: bool = False,
+    verbose: bool = False,
 ) -> None:
     """Perform inspection on a list of files using the agent in bounded read-only mode."""
     if not model:
@@ -208,7 +208,7 @@ def prompt_inspect(
         neural_model,
         tools=lib.make_bounded_tools(common_root, allow_write=False),
         max_iterations=20,
-        show_thinking=show_thinking,
+        show_diagnostics=verbose,
     )
     result = coding_agent.run(task, system=system)
     print(result)
@@ -400,8 +400,8 @@ def prompt_agent(
     model: Union[Path, str],
     system: str = "",
     tools: Optional[List] = None,
-    max_iterations: int = 20,
-    show_thinking: bool = False,
+    agent_iterations: int = 20,
+    verbose: bool = False,
 ) -> str:
     """Run the agentic loop on *task* using the supplied model string.
 
@@ -410,15 +410,15 @@ def prompt_agent(
     The Agent drives the model through iterative tool calls until it emits a
     <final_answer> block and returns that text.
 
-    Set show_thinking=True to print each iteration's reasoning and tool calls
+    Set verbose=True to print agent diagnostics (per-iteration reasoning and tool calls)
     to stdout as the agent works.
     """
     neural_model = _set_neural_model(model)
     coding_agent = lib.Agent(
         neural_model,
         tools=tools if tools is not None else lib.DEFAULT_TOOLS,
-        max_iterations=max_iterations,
-        show_thinking=show_thinking,
+        max_iterations=agent_iterations,
+        show_diagnostics=verbose,
         tool_output_max_chars=None,
     )
     return coding_agent.run(task, system=system)
@@ -452,9 +452,9 @@ def _write_loop_status(path: Path, payload: Dict[str, Any]) -> None:
 def prompt_loop(
     task_file: Union[Path, str],
     model: Union[Path, str],
-    max_loops: int = 5,
+    agent_loops: int = 5,
     agent_iterations: int = 12,
-    show_thinking: bool = False,
+    verbose: bool = False,
     workdir: Optional[Union[Path, str]] = None,
 ) -> str:
     """
@@ -482,13 +482,13 @@ def prompt_loop(
         "never run find, ls, cat, or any command targeting system directories or paths outside it."
     )
 
-    for loop_idx in range(1, max_loops + 1):
+    for loop_idx in range(1, agent_loops + 1):
         _write_loop_status(
             paths["status"],
             {"loop": loop_idx, "state": "running", "summary": ""},
         )
 
-        if show_thinking:
+        if verbose:
             print(f"\n▶  loop {loop_idx}")
 
         try:
@@ -500,7 +500,7 @@ def prompt_loop(
             neural_model,
             tools=tools,
             max_iterations=agent_iterations,
-            show_thinking=show_thinking,
+            show_diagnostics=verbose,
         )
 
         final_answer = bounded_agent.run(
@@ -531,8 +531,8 @@ def prompt_loop(
             {"loop": loop_idx, "state": "complete", "summary": summary},
         )
 
-        if show_thinking:
+        if verbose:
             detail = f"  {summary[:65]}" if summary else ""
             print(f"  ↩  session complete{detail}\n")
 
-    return f"completed {max_loops} loop(s)  —  report: {paths['report']}"
+    return f"completed {agent_loops} loop(s)  —  report: {paths['report']}"
