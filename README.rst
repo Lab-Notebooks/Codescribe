@@ -11,17 +11,16 @@
  Overview
 **********
 
-Codescribe is an AI-assisted framework designed to streamline
-Fortran-to-C++ code translation and facilitate the development and
-maintenance of scientific codebases. It automates the process of
-generating corresponding C++ source files and creating Fortran-C++
-interfaces, simplifying the integration of Fortran and C++. The tool
-allows users to interface with large language models (LLMs) through the
-API endpoints and locally through the Transformers library, and enables
-the creation of custom prompts tailored to the specific needs of the
-source code. Codescribe empowers research software engineers by
-complementing existing tools like OpenAI Codex and addressing the niche
-requirements of scientific software development.
+Codescribe is an AI-assisted framework for scientific software
+development. Its original focus is incremental Fortran-to-C++
+translation, including generation of corresponding C++ source files and
+Fortran-C++ interface layers, but the current codebase also supports
+general code inspection, generation, update, and agentic workflows.
+Codescribe can talk to multiple large language model (LLM) backends via
+hosted APIs, OpenAI-compatible endpoints, or local Transformers models,
+and it supports both prompt-driven and tool-using workflows. This makes
+it useful both for modernizing legacy scientific codes and for broader
+code-generation and maintenance tasks.
 
 ***********
  Resources
@@ -58,8 +57,8 @@ requirements of scientific software development.
 -  Custom Prompts: Automatically generate prompts for generative AI to
    assist with the conversion process.
 
--  Language Model Integration: Leverage LLMs through the Transformers
-   API to refine the translation and improve accuracy.
+-  Language Model Integration: Use OpenAI, Anthropic, ARGO,
+   OpenAI-compatible endpoints, or local Transformers checkpoints.
 
    |fig2|
 
@@ -68,6 +67,12 @@ requirements of scientific software development.
 
 -  Code Generation and Update: Create new source files or modify
    existing ones from natural-language prompts.
+
+-  Agentic Coding: Run iterative tool-using agents with ``read``,
+   ``bash``, ``edit``, and ``write`` tools.
+
+-  Bounded Project Loops: Run repeated, fresh-session coding loops over
+   a task file while constraining tool access to the working tree.
 
 *******************
  Statement of Need
@@ -121,18 +126,21 @@ understanding of their functionality.
    ▶ code-scribe --help
    Usage: code-scribe [OPTIONS] COMMAND [ARGS]...
 
-     Software development tool for converting code from Fortran to C++
+     Software development tool for code conversion, generation, and
+     agentic workflows in scientific computing
 
    Options:
      -v, --version
      --help         Show this message and exit.
 
    Commands:
+     agent      Run a tool-using coding agent on a task
      draft      Perform a draft conversion from Fortran to C++
      format     Format TOML seed prompt files
      generate   Perform AI-based code generation
      index      Index Fortran files along a project directory tree
      inspect    Perform AI code inspection on files
+     loop       Run repeated bounded agent sessions over a task file
      translate  Perform AI-based code conversion of Fortran files
      update     Perform AI-based code update on files
 
@@ -172,14 +180,12 @@ Following is a brief overview of different commands:
    each statement in the original source code.
 
 #. ``code-scribe translate <filelist> -m <model_name_or_path> -p
-   <seed_prompt.toml>``: This command performs neural translation using
-   generative AI. You can either download a model locally from
-   HuggingFace and provide it as an option to ``-m`` or you can simply
-   set ``-m openai-gpt-4o`` to use the OpenAI API to perform code
-   translation. Note that ``-m openai-gpt-4o`` requires the environment
-   variable ``OPENAI_API_KEY`` to be set. The ``<prompt.toml>`` is a
-   chat template that guides AI to perform code translation using the
-   source and draft ``.scribe`` files.
+   <seed_prompt.toml>``: Perform AI-assisted translation using a prompt
+   template and a selected model backend. The model may be a local
+   Hugging Face / Transformers checkpoint path or a prefixed hosted
+   backend such as ``openai-gpt-4o``. The ``<prompt.toml>`` file is a
+   chat template that guides translation using the source and draft
+   ``.scribe`` files.
 
    .. code:: toml
 
@@ -201,14 +207,14 @@ Following is a brief overview of different commands:
       content = "<Append code from a source file>"
 
 #. ``code-scribe translate <filelist> -p <seed_prompt.toml>
-   --save-prompts``: This command allows the generation of file-specific
-   JSON chat templates that one can copy/paste to chat interfaces like
-   that of ChatGPT to generate the source code. The JSON files are
-   created from the seed prompt file and appended with source and draft
+   --save-prompts``: Generate file-specific JSON chat templates that can
+   be copied into external chat interfaces. These JSON files are derived
+   from the seed prompt and augmented with the relevant source and draft
    code.
 
 #. ``code-scribe inspect <filelist> -q <query_prompt> --save-prompts``:
-   Create a scribe.json that you can copy/paste to chat interfaces.
+   Save an inspection prompt to ``scribe.json`` so it can be reused in
+   an external chat interface.
 
 #. ``code-scribe inspect <filelist> -q <query_prompt> -m
    <model_name_or_path>``: Perform a query on a set of source files
@@ -216,24 +222,79 @@ Following is a brief overview of different commands:
    understanding the source code.
 
 #. ``code-scribe generate <seed_prompt> -m <model_name_or_path>``:
-   Generate new source files or applications based on specifications in
-   the prompt.
+   Generate new source files or applications from a prompt file.
 
 #. ``code-scribe generate "<natural_language_prompt>" -m
    <model_name_or_path> -r <reference_file1> -r <reference_file2>``:
-   Generate new source files or applications based on specifications in
-   the prompt. This implementation offers great flexibility in
-   generating source code and specification files.
+   Generate new source files or applications from a natural-language
+   prompt while using existing files as read-only references.
 
 #. ``code-scribe update <filelist> -p <seed_prompt.toml> -m
    <model_name_or_path>``: Modify or extend existing source files using
-   seed prompt files.
+   a seed prompt file.
 
 #. ``code-scribe update <filelist> -q "<natural_language_prompt>" -r
    <reference_file1> -r <reference_file2> -m <model_name_or_path>``:
-   This command allows for updating files using natural language prompts
-   and reference files. This implementation offers great flexibility in
-   updating existing files.
+   Update files from a natural-language prompt while using additional
+   files as read-only references.
+
+#. ``code-scribe agent "<task>" -m <model_name_or_path>``: Run a
+   standalone coding agent that can iteratively use ``read``, ``bash``,
+   ``edit``, and ``write`` tools until it reaches a final answer. When a
+   backend supports native tool calling, Codescribe uses that directly;
+   otherwise it falls back to a text protocol using ``<tool_call>`` and
+   ``<final_answer>`` blocks.
+
+#. ``code-scribe loop <task_file> -m <model_name_or_path>``: Run a
+   repeated bounded loop in which each session starts fresh, reads the
+   task file, performs exactly one important pending task, writes a
+   concise report, and exits. Loop status is written under
+   ``.codescribe/loop/``.
+
+***************
+ Agentic Modes
+***************
+
+Codescribe now includes two agent-oriented workflows in addition to the
+prompt-driven translation and generation commands.
+
+#. **Agent mode** runs a single tool-using agent session on a task.
+   The available tools are:
+
+   - ``read``: read file contents with optional line offsets
+   - ``bash``: run shell commands
+   - ``edit``: perform exact-text replacements in files
+   - ``write``: create or overwrite files
+
+#. **Loop mode** runs multiple fresh agent sessions over a task file.
+   Each session is intentionally stateless and must infer project state
+   from the files in the working directory. In bounded mode, tool access
+   is restricted to the working tree and the task file itself is treated
+   as read-only input.
+
+When verbose mode is enabled, Codescribe prints per-iteration
+information including iteration number, token usage, tool calls, and a
+short status summary for each tool result. In loop mode it also writes:
+
+-  ``.codescribe/loop/status.json``
+-  ``.codescribe/loop/report.md``
+
+A typical verbose loop session looks like this:
+
+.. code:: text
+
+   ▶  loop 1
+     iter 1
+       usage  in 1,353  out 81  total 1,434
+       ▸ read   prompt.md                                                 21 lines
+
+Sessions stop when the agent emits a final answer or when the configured
+iteration limit is reached. If the limit is reached first, the run ends
+with a message similar to:
+
+.. code:: text
+
+   [Agent stopped: max_iterations=12 reached without a final answer]
 
 ***************************
  Integrating LLM of Choice
@@ -262,11 +323,9 @@ Following is a brief overview of different commands:
 
       pip install openai
 
-#. **Hugging Face Transformers (TFModel)**: If you want to use a Hugging
-   Face model, such as those found on the Hugging Face model hub (e.g.,
-   Mistral, Llama), you can specify the path to the pre-trained model or
-   use a model directly from the Hugging Face library. Codescribe
-   supports this integration with the `TFModel` class.
+#. **Hugging Face Transformers (TFModel)**: You can use a local Hugging
+   Face / Transformers checkpoint by passing its path as the model
+   argument. Codescribe supports this through the ``TFModel`` backend.
 
    To use a Hugging Face model, first install the necessary libraries if
    not already installed:
@@ -331,24 +390,6 @@ Following is a brief overview of different commands:
 
       pip install anthropic
 
-   You can also use this backend for Claude Code Agent sessions by
-   specifying the ``claudecode`` prefix (see below), but ``anthropic-``
-   routes directly through the Anthropic API without the Claude CLI.
-
-#. **Claude Code Agent**: Codescribe can use the ``claude`` CLI as a
-   subprocess for agentic interactions. The ``claudecode`` prefix invokes
-   the installed Claude Code CLI. For example:
-
-   .. code:: bash
-
-      ▶ code-scribe inspect <filelist> -q "<query>" -m claudecode-claude-sonnet-4-6
-
-   The ``claude`` CLI must be installed and available in your ``PATH``:
-
-   .. code:: bash
-
-      npm install -g @anthropic-ai/claude-code
-
 #. **OpenAI-Compatible Endpoints (Ollama, ALCF, etc.)**: Codescribe
    supports any OpenAI-compatible API endpoint via the ``oaic-`` prefix.
    The ``oaic-`` prefix is **required** — it routes the request to the
@@ -371,55 +412,95 @@ Following is a brief overview of different commands:
       # Required: Provider label (used internally for auth routing)
       export OPENAI_COMP_PROVIDER="ollama"
 
-      # Optional: API key (usually not needed for local Ollama)
-      export OPENAI_COMP_APIKEY=""
+      # Required by the current implementation, even for local endpoints
+      export OPENAI_COMP_APIKEY="your_api_key_or_placeholder"
+
+   In the current implementation, ``OPENAI_COMP_APIKEY`` is required by
+   the Python backend even if the upstream compatible endpoint itself
+   does not require authentication.
 
    **Note**: For ALCF inference endpoints, set `OPENAI_COMP_PROVIDER` to
-   a value containing `alcf` (e.g., `alcf-inference`) and ensure
-   `ALCF_INFERENCE_APIKEY` is set.
+   a value containing `alcf` (e.g., `alcf-inference`).
 
 #. **Saving Custom Prompts**: Instead of selecting a model and running
-   the commands interactively, you can also save the generated prompts
-   for later use. Use the `--save-prompts` flag to store the prompts in
-   a JSON format. This is useful if you want to copy and paste the
-   prompts into an external tool, like ChatGPT, for further refinement.
+   a command immediately, you can save the generated prompts for later
+   use. Use the ``--save-prompts`` flag to store prompts in JSON format,
+   which is useful when copying them into an external chat tool.
 
    .. code:: bash
 
       ▶ code-scribe translate <filelist> -p <seed_prompt.toml> --save-prompts
 
-   The saved prompts will be stored in a `scribe.json` file.
+   For ``inspect``, the saved prompt is written to ``scribe.json``. For
+   ``translate``, prompt files are generated per source file.
 
 ***********************
  Environment Variables
 ***********************
 
-To streamline the usage of Codescribe and avoid repeatedly specifying
-the `-m` flag for model selection, you can set the environment variable
-`CODESCRIBE_MODEL` to the desired model name or path. For example:
+Codescribe uses different environment variables depending on the model
+backend you select.
 
-.. code:: bash
+-  ``OPENAI_API_KEY`` for ``openai-`` models
+-  ``ANTHROPIC_API_KEY`` for ``anthropic-`` models
+-  ``ARGO_USER`` and ``ARGO_API_ENDPOINT`` for ``argo-`` models
+-  ``OPENAI_COMP_BASEURL``, ``OPENAI_COMP_PROVIDER``, and
+   ``OPENAI_COMP_APIKEY`` for ``oaic-`` models
+-  ``CODESCRIBE_ARCHIVE`` to save prompt/response transcripts for later
+   analysis
 
-   export CODESCRIBE_MODEL="argo-gpt4o"
-
-This will automatically use the specified model for all commands without
-requiring the `-m` flag.
-
-Additionally, to archive interactions with LLMs for downstream analysis
-or debugging, you can set the `CODESCRIBE_ARCHIVE` environment variable
-to a directory path where the interactions will be stored:
+To archive interactions with LLMs for downstream analysis or debugging,
+set ``CODESCRIBE_ARCHIVE`` to a directory path where the interactions
+will be stored:
 
 .. code:: bash
 
    export CODESCRIBE_ARCHIVE="/path/to/archive/directory"
 
-By setting these environment variables, you can simplify your workflow
-and ensure that all interactions are logged for future reference.
+Archived conversations are written as TOML files under a dated folder
+structure.
+
+*********************************
+ Bounded Loop Diagnostics and Caveats
+*********************************
+
+When using ``code-scribe loop`` the agent runs with bounded tools rooted
+at the working directory. In particular, bounded ``bash`` is deliberately
+restrictive:
+
+-  shell metacharacters such as ``|``, ``&``, ``;``, ``>``, ``<``,
+   backticks, ``$``, and backslashes are rejected
+-  explicit executable paths are rejected
+-  absolute paths and ``..`` path escapes are rejected
+-  only a small allowlist of commands is permitted, including ``ls``,
+   ``pwd``, ``find``, ``grep``, ``head``, ``tail``, ``wc``, ``git``,
+   ``test``, ``echo``, and ``sed``
+
+This means commands such as the following will fail in bounded mode:
+
+.. code:: text
+
+   bash   find generated-src -type f -name '*.py'
+   err    shell metacharacters are not allowed in bounded mode
+
+   bash   cd generated-src && python -m tests.test_cg
+   err    shell metacharacters are not allowed in bounded mode
+
+   bash   python generated-src/tests/test_cg.py
+   err    command 'python' is not allowed in bounded mode
+
+   bash   python3 generated-src/tests/test_cg.py
+   err    command 'python3' is not allowed in bounded mode
+
+These diagnostics are expected and useful: they show exactly how the
+bounded tool layer constrains an agent session when running against
+OpenAI-compatible backends such as ``oaic-*``.
 
 By following these steps, you can integrate any of the supported
 language models into Codescribe and use them for incremental
-translation of Fortran codebases to C++. Please see the source file
-`lib/_llm.py` to view the source code.
+translation, inspection, generation, update, and bounded agentic
+workflows. Please see the source file ``codescribe/lib/_llm.py`` for
+backend details.
 
 **********
  Citation
