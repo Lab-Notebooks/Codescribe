@@ -74,6 +74,10 @@ code-generation and maintenance tasks.
 -  Bounded Project Loops: Run repeated, fresh-session coding loops over
    a task file while constraining tool access to the working tree.
 
+-  Agent Internals Documentation: See ``docs/agent.md`` for a concise,
+   first-principles explanation of the architecture and design of
+   ``codescribe/lib/_agent.py``.
+
 *******************
  Statement of Need
 *******************
