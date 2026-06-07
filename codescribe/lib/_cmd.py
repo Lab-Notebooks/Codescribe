@@ -402,7 +402,7 @@ def prompt_agent(
     tools: Optional[List] = None,
     agent_iterations: int = 20,
     verbose: bool = False,
-    log: Optional[Union[Path, str]] = None,
+    logging: Optional[Union[Path, str]] = None,
 ) -> str:
     """Run the agentic loop on *task* using the supplied model string.
 
@@ -416,13 +416,11 @@ def prompt_agent(
     """
     neural_model = _set_neural_model(model)
 
-    diagnostics = None
-    if log is not None:
-        # If log is passed as an empty string (e.g. CLI --log with no PATH),
+    logfile = None
+    if logging is not None:
+        # If logging is passed as an empty string (e.g. CLI --log with no PATH),
         # JsonlDiagnosticsSink will use its default location.
-        from ._diagnostics import JsonlDiagnosticsSink
-
-        diagnostics = JsonlDiagnosticsSink(path=str(log) if str(log) else None)
+        logfile = lib.JsonlDiagnosticsSink(path=str(logging) if str(logging) else None)
 
     coding_agent = lib.Agent(
         neural_model,
@@ -430,7 +428,7 @@ def prompt_agent(
         max_iterations=agent_iterations,
         show_diagnostics=verbose,
         tool_output_max_chars=None,
-        diagnostics=diagnostics,
+        logging=logfile,
     )
     return coding_agent.run(task, system=system)
 
@@ -466,7 +464,7 @@ def prompt_loop(
     agent_loops: int = 5,
     agent_iterations: int = 12,
     verbose: bool = False,
-    log: Optional[Union[Path, str]] = None,
+    logging: Optional[Union[Path, str]] = None,
     workdir: Optional[Union[Path, str]] = None,
 ) -> str:
     """
@@ -508,18 +506,16 @@ def prompt_loop(
         except Exception as exc:
             task_content = f"(could not read task file: {exc})"
 
-        diagnostics = None
-        if log is not None:
-            from ._diagnostics import JsonlDiagnosticsSink
-
-            diagnostics = JsonlDiagnosticsSink(path=str(log) if str(log) else None)
+        logfile = None
+        if logging is not None:
+            logfile = JsonlDiagnosticsSink(path=str(logging) if str(logging) else None)
 
         bounded_agent = lib.Agent(
             neural_model,
             tools=tools,
             max_iterations=agent_iterations,
             show_diagnostics=verbose,
-            diagnostics=diagnostics,
+            logging=logfile,
         )
 
         final_answer = bounded_agent.run(

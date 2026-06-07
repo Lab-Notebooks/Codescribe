@@ -352,7 +352,7 @@ def agent(
     \b
     This command drives a generative AI model through an
     iterative tool-call loop until the task is complete.
-    Available tools: read, bash, edit, write, grep, find, ls
+    Available tools: read, bash, edit, write
     \b
     """
     effective_log = None
@@ -368,7 +368,7 @@ def agent(
         system=system,
         agent_iterations=agent_iterations,
         verbose=verbose,
-        log=effective_log,
+        logging=effective_log,
     )
     click.echo(result)
 
@@ -460,7 +460,7 @@ def loop(
         agent_loops=agent_loops,
         agent_iterations=agent_iterations,
         verbose=verbose,
-        log=effective_log,
+        logging=effective_log,
         workdir=Path(workdir) if workdir else None,
     )
     click.echo(result)

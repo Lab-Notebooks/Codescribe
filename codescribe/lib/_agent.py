@@ -746,7 +746,7 @@ class Agent:
         max_iterations: int = 20,
         show_diagnostics: bool = False,
         tool_output_max_chars: Optional[int] = 4000,
-        diagnostics: Optional[Any] = None,
+        logging: Optional[Any] = None,
     ) -> None:
 
         if not isinstance(model, lib.ALLOWED_MODEL_TYPES):
@@ -762,8 +762,8 @@ class Agent:
         self.show_diagnostics = show_diagnostics
         self.tool_output_max_chars = tool_output_max_chars
 
-        # Diagnostics sink (JSONL recommended). Must expose .emit(dict).
-        self.diagnostics = diagnostics if diagnostics is not None else NullDiagnosticsSink()
+        # Logging sink (JSONL recommended). Must expose .emit(dict).
+        self.logging = logging if logging is not None else NullDiagnosticsSink()
 
     def enable_tool(self, name: str) -> None:
         if name not in self._tools:
@@ -814,7 +814,7 @@ class Agent:
                     output = f"Error: {err}"
                 else:
                     try:
-                        self.diagnostics.emit(
+                        self.logging.emit(
                             {
                                 "event": "tool_start",
                                 "run_id": run_id,
@@ -838,7 +838,7 @@ class Agent:
             truncated = len(output) > self.tool_output_max_chars
 
         try:
-            self.diagnostics.emit(
+            self.logging.emit(
                 {
                     "event": "tool_end",
                     "run_id": run_id,
@@ -905,7 +905,7 @@ class Agent:
 
         run_id = new_run_id()
         try:
-            self.diagnostics.emit(
+            self.logging.emit(
                 {
                     "event": "run_start",
                     "run_id": run_id,
@@ -918,7 +918,7 @@ class Agent:
 
         for iteration in range(self.max_iterations):
             try:
-                self.diagnostics.emit(
+                self.logging.emit(
                     {
                         "event": "iteration_start",
                         "run_id": run_id,
@@ -953,7 +953,7 @@ class Agent:
                 )
 
             try:
-                self.diagnostics.emit(
+                self.logging.emit(
                     {
                         "event": "model_response",
                         "run_id": run_id,
@@ -983,7 +983,7 @@ class Agent:
                 messages.extend(self.model.format_tool_result_messages(tool_calls, outputs))
 
                 try:
-                    self.diagnostics.emit(
+                    self.logging.emit(
                         {
                             "event": "iteration_end",
                             "run_id": run_id,
@@ -1006,7 +1006,7 @@ class Agent:
                     )
 
                 try:
-                    self.diagnostics.emit(
+                    self.logging.emit(
                         {
                             "event": "run_end",
                             "run_id": run_id,
@@ -1040,7 +1040,7 @@ class Agent:
             )
 
         try:
-            self.diagnostics.emit(
+            self.logging.emit(
                 {
                     "event": "run_end",
                     "run_id": run_id,
@@ -1070,7 +1070,7 @@ class Agent:
 
         run_id = new_run_id()
         try:
-            self.diagnostics.emit(
+            self.logging.emit(
                 {
                     "event": "run_start",
                     "run_id": run_id,
@@ -1089,7 +1089,7 @@ class Agent:
 
         for iteration in range(self.max_iterations):
             try:
-                self.diagnostics.emit(
+                self.logging.emit(
                     {
                         "event": "iteration_start",
                         "run_id": run_id,
@@ -1105,7 +1105,7 @@ class Agent:
             total_output_tokens += _count_tokens(response)
 
             try:
-                self.diagnostics.emit(
+                self.logging.emit(
                     {
                         "event": "model_response",
                         "run_id": run_id,
@@ -1163,7 +1163,7 @@ class Agent:
                 current_context_tokens += _count_tokens(tool_results_text)
 
                 try:
-                    self.diagnostics.emit(
+                    self.logging.emit(
                         {
                             "event": "iteration_end",
                             "run_id": run_id,
@@ -1202,7 +1202,7 @@ class Agent:
                         f"total {total:,}"
                     )
                 try:
-                    self.diagnostics.emit(
+                    self.logging.emit(
                         {
                             "event": "run_end",
                             "run_id": run_id,
@@ -1236,7 +1236,7 @@ class Agent:
             )
 
         try:
-            self.diagnostics.emit(
+            self.logging.emit(
                 {
                     "event": "run_end",
                     "run_id": run_id,

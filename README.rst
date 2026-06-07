@@ -57,8 +57,8 @@ code-generation and maintenance tasks.
 -  Custom Prompts: Automatically generate prompts for generative AI to
    assist with the conversion process.
 
--  Language Model Integration: Use OpenAI, Anthropic, ARGO,
-   OpenAI-compatible endpoints, or local Transformers checkpoints.
+-  Language Model Integration: Use OpenAI, Anthropic,
+   OpenAI-compatible endpoints (recommended), or local Transformers checkpoints.
 
    |fig2|
 
@@ -266,12 +266,9 @@ prompt-driven translation and generation commands.
    The available tools are:
 
    - ``read``: read file contents with optional line offsets
-   - ``bash``: run shell commands
+   - ``bash``: run shell commands (use this for ``ls``, ``find``, ``grep``, etc.)
    - ``edit``: perform exact-text replacements in files
    - ``write``: create or overwrite files
-   - ``grep``: search for text patterns in files
-   - ``find``: locate files under the working tree
-   - ``ls``: list files and directories
 
 #. **Loop mode** runs multiple fresh agent sessions over a task file.
    Each session is intentionally stateless and must infer project state
@@ -352,33 +349,39 @@ with a message similar to:
    `https://huggingface.co/models` and choosing one that fits your
    needs.
 
-#. **ARGO Models**: Codescribe also supports integration with Argonne's
-   ARGO models, such as `argo-gpt4o`. The ``argo-`` prefix is required
-   when specifying ARGO models. These models are accessible on the
-   Argonne network by setting the environment variables `ARGO_USER` and
-   `ARGO_API_ENDPOINT`. To use ARGO models, specify `-m argo-gpt4o` or
-   any other ARGO-supported model of your choice when executing
-   commands, as shown below:
+#. **ARGO Models (legacy / environment-specific)**: Codescribe also supports
+   Argonne's ARGO models via the ``argo-`` prefix.
+
+   **Note**: Unlike ``openai-*``, ``anthropic-*``, and ``oaic-*``, ARGO does
+   **not** support native tool calling in the current implementation, so
+   agentic workflows use the text-protocol fallback.
+
+   ARGO requires access to an ARGO endpoint and is mainly useful in
+   environments where it is already provisioned.
 
    .. code:: bash
 
       ▶ code-scribe translate <filelist> -m argo-gpt4o -p <seed_prompt.toml>
 
-   Ensure that the environment variables `ARGO_USER` and
-   `ARGO_API_ENDPOINT` are set correctly. For example:
+   Environment variables:
 
    .. code:: bash
 
       export ARGO_USER="your_argo_username"
       export ARGO_API_ENDPOINT="argo_api_endpoint"
 
-   ARGO models are recommended for users with access to the Argonne
-   network.
-
 #. **Anthropic Models**: Codescribe supports Anthropic's Claude models
    (such as `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`,
    etc.) via the Anthropic API. The ``anthropic-`` prefix is required
    when specifying these models. For example, to use Claude Opus 4.8:
+
+   Optional: set ``ANTHROPIC_BASE_URL`` to override the API base URL.
+
+   .. code:: bash
+
+      export ANTHROPIC_BASE_URL="https://api.anthropic.com"
+
+   (Most users should not need this.)
 
    .. code:: bash
 
@@ -402,8 +405,13 @@ with a message similar to:
    The ``oaic-`` prefix is **required** — it routes the request to the
    endpoint configured via ``OPENAI_COMP_BASEURL``. This makes it
    straightforward to use on-premises models such as Ollama or hosted
-   inference services. For example, to use a locally running Ollama
-   instance with `llama3.1`:
+   inference services.
+
+   **This is the recommended backend** for most users because it works
+   with many providers that expose an OpenAI-compatible API.
+
+   For example, to use a locally running Ollama instance with
+   `llama3.1`:
 
    .. code:: bash
 
@@ -450,11 +458,14 @@ backend you select.
 
 -  ``OPENAI_API_KEY`` for ``openai-`` models
 -  ``ANTHROPIC_API_KEY`` for ``anthropic-`` models
+-  ``ANTHROPIC_BASE_URL`` (optional) for ``anthropic-`` models
 -  ``ARGO_USER`` and ``ARGO_API_ENDPOINT`` for ``argo-`` models
 -  ``OPENAI_COMP_BASEURL``, ``OPENAI_COMP_PROVIDER``, and
    ``OPENAI_COMP_APIKEY`` for ``oaic-`` models
 -  ``CODESCRIBE_ARCHIVE`` to save prompt/response transcripts for later
    analysis
+
+For more backend details, see ``docs/models.md``.
 
 To archive interactions with LLMs for downstream analysis or debugging,
 set ``CODESCRIBE_ARCHIVE`` to a directory path where the interactions
@@ -472,36 +483,24 @@ structure.
 *********************************
 
 When using ``code-scribe loop`` the agent runs with bounded tools rooted
-at the working directory. In particular, bounded ``bash`` is deliberately
-restrictive:
+at the working directory.
 
--  shell metacharacters such as ``|``, ``&``, ``;``, ``>``, ``<``,
-   backticks, ``$``, and backslashes are rejected
--  explicit executable paths are rejected
--  absolute paths and ``..`` path escapes are rejected
--  only a small allowlist of commands is permitted, including ``ls``,
-   ``pwd``, ``find``, ``grep``, ``head``, ``tail``, ``wc``, ``git``,
-   ``test``, ``echo``, and ``sed``
+Bounded mode is intentionally restrictive (especially bounded ``bash``).
+The exact allowlist and blocked characters are implementation details and
+may evolve; see ``codescribe/lib/_agent.py`` for the authoritative policy.
 
-This means commands such as the following will fail in bounded mode:
+A few common failure modes you may see in bounded mode:
 
 .. code:: text
 
    bash   find generated-src -type f -name '*.py'
    err    shell metacharacters are not allowed in bounded mode
 
-   bash   cd generated-src && python -m tests.test_cg
-   err    shell metacharacters are not allowed in bounded mode
-
    bash   python generated-src/tests/test_cg.py
    err    command 'python' is not allowed in bounded mode
 
-   bash   python3 generated-src/tests/test_cg.py
-   err    command 'python3' is not allowed in bounded mode
-
-These diagnostics are expected and useful: they show exactly how the
-bounded tool layer constrains an agent session when running against
-OpenAI-compatible backends such as ``oaic-*``.
+For the full architecture and bounded-mode design rationale, see
+``docs/agent.md``.
 
 By following these steps, you can integrate any of the supported
 language models into Codescribe and use them for incremental

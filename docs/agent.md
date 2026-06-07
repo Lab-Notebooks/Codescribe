@@ -344,34 +344,19 @@ This mode is designed for safer project-local loops.
 
 ### 10.3 Blocked shell features
 
-The set `_BLOCKED_CHARS` contains:
+Bounded `bash` rejects a small set of shell metacharacters.
 
-- `|`
-- `&`
-- `;`
-- `>`
-- `<`
-- `` ` ``
-- `$`
-- `\`
+The exact set is an implementation detail (see `BashTool._BLOCKED_CHARS` in
+`codescribe/lib/_agent.py`) and may evolve.
 
 These are rejected in bounded mode because they enable piping, redirection, command chaining, interpolation, or escaping behavior that would make command validation much weaker.
 
 ### 10.4 Allowed commands
 
-The default bounded allowlist is:
+Bounded `bash` uses a small allowlist.
 
-- `ls`
-- `pwd`
-- `find`
-- `grep`
-- `head`
-- `tail`
-- `wc`
-- `git`
-- `test`
-- `echo`
-- `sed`
+The exact allowlist is an implementation detail (see `BashTool._DEFAULT_ALLOWED` in
+`codescribe/lib/_agent.py`) and may evolve.
 
 The allowlist keeps the tool useful for inspection while preventing general arbitrary program execution.
 
@@ -670,8 +655,10 @@ Constructor inputs are:
 
 - `model`
 - `tools=None`
-- `agent_iterations=20`
+- `max_iterations=20`
 - `show_diagnostics=False`
+- `tool_output_max_chars=4000`
+- `diagnostics=None`
 
 ### Important design detail: tool copying
 
