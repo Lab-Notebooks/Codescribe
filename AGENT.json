@@ -7,13 +7,15 @@
     "capabilities": [
       "Incremental Fortran → C++ translation (with interface-layer support)",
       "Code inspection, generation, and update",
-      "Tool-using coding agent workflows (read/bash/edit/write)",
-      "Bounded, fresh-session agent loops over a task file"
+      "Tool-using coding agent workflows (read/glob/bash/edit/write)",
+      "Bounded execution→review loop over a task file with durable on-disk state"
     ],
     "entry_points": [
       "CLI: code-scribe (see --help)",
       "Agent runtime: codescribe/lib/_agent.py",
-      "Model backends: codescribe/lib/_llm.py"
+      "Tool implementations: codescribe/lib/_tools.py",
+      "Model backends: codescribe/lib/_llm.py",
+      "Loop runtime: codescribe/lib/_loop.py"
     ]
   },
   "install": {
@@ -28,6 +30,12 @@
   "model_setup": {
     "recommended": "OpenAI-compatible endpoints (oaic-*)",
     "environment_variables": [
+      {
+        "name": "CODESCRIBE_MODEL",
+        "required": false,
+        "description": "Default model name used when -m/--model is omitted.",
+        "example": "oaic-llama3.1"
+      },
       {
         "name": "OPENAI_COMP_BASEURL",
         "required": true,
@@ -60,26 +68,45 @@
       {
         "command": "loop",
         "bounded": true,
-        "description": "Runs repeated fresh sessions over a task file using bounded tools rooted at the working tree.",
+        "description": "Repeated execution→review cycles. Each cycle starts a fresh agent session bounded to the working directory. State is persisted under .codescribe/loop/.",
+        "options": {
+          "--workdir DIR": "Root directory the agent is bounded to (default: cwd)",
+          "--agent-loops/-nloop N": "Number of execution→review cycles (default: 5)",
+          "--agent-iterations/-niter N": "Tool-call budget per cycle (default: 12)"
+        },
         "artifacts": [
-          ".codescribe/loop/status.json",
-          ".codescribe/loop/report.md"
+          ".codescribe/loop/run.json",
+          ".codescribe/loop/state.json",
+          ".codescribe/loop/execution.jsonl",
+          ".codescribe/loop/previous.md",
+          ".codescribe/loop/history.md",
+          ".codescribe/loop/plan.md",
+          ".codescribe/loop/review.jsonl"
         ]
       },
       {
         "command": "agent",
         "bounded": false,
-        "description": "Single agent session with unbounded tools (use with care)."
+        "description": "Single agent session with unbounded tools (use with care). Supports --verbose/-v to stream tool calls to stdout and --log/--log-path to write JSONL diagnostics."
       }
     ],
     "notes": [
       "Bounded mode is a practical constraint layer, not an OS sandbox.",
-      "Bounded bash uses an allowlist and rejects shell metacharacters; some commands will fail by design."
+      "Bounded bash uses an allowlist and rejects shell metacharacters; some commands will fail by design.",
+      "The loop task file can extend the bash allowlist via a [tools] bash = [...] TOML section."
     ],
     "docs": [
       {
         "path": "docs/agent.md",
         "description": "Agent architecture and bounded-mode policy"
+      },
+      {
+        "path": "docs/loop.md",
+        "description": "Loop mode internals and on-disk artifacts"
+      },
+      {
+        "path": "docs/tools.md",
+        "description": "Tool implementations (read/glob/bash/edit/write)"
       }
     ]
   }

@@ -21,7 +21,8 @@ supports code inspection, generation, updating, and tool-using agent workflows.
 
 - Incremental Fortran → C++ translation with interface-layer support.
 - Prompt-driven workflows: inspect / generate / update / translate.
-- Agentic workflows with tools: ``read``, ``bash``, ``edit``, ``write``.
+- Agentic workflows with tools: ``read``, ``glob``, ``bash``, ``edit``, ``write``.
+- Bounded loop mode: repeated execution → review cycles with durable state.
 - Multiple backends: OpenAI, Anthropic, OpenAI-compatible endpoints, ARGO,
   and local Transformers checkpoints.
 
@@ -49,19 +50,27 @@ Primary commands:
 - ``index``: index Fortran source trees and write ``scribe.yaml`` metadata.
 - ``draft``: create ``.scribe`` draft files (prompt scaffolding).
 - ``translate``: LLM-assisted Fortran → C++ translation.
-- ``inspect``: ask questions about files.
+- ``inspect``: ask questions about files (bounded read-only agent).
 - ``generate``: create new code from prompts.
 - ``update``: modify existing code from prompts.
-- ``agent``: run a tool-using coding agent on a task.
-- ``loop``: run repeated *bounded* agent sessions over a task file.
+- ``format``: render TOML seed prompt files to markdown.
+- ``agent``: run a tool-using coding agent on a task (unbounded).
+- ``loop``: run repeated bounded execution → review cycles over a task file.
 
-Agent docs:
+Key flags:
 
-- ``docs/agent.md`` (architecture + bounded-mode policy)
+- ``agent --verbose/-v``: stream per-iteration tool calls to stdout.
+- ``agent --log / --log-path PATH``: write JSONL diagnostics to disk.
+- ``loop --workdir DIR``: set the root directory the agent is bounded to.
+- ``loop --agent-loops/-nloop N``: number of execution → review cycles (default 5).
+- ``loop --agent-iterations/-niter N``: tool-call budget per cycle (default 12).
 
-Model/backends docs:
+Docs:
 
-- ``docs/models.md``
+- ``docs/agent.md`` — agent architecture and bounded-mode policy
+- ``docs/loop.md`` — loop mode internals and on-disk artifacts
+- ``docs/tools.md`` — tool implementations (read/glob/bash/edit/write)
+- ``docs/models.md`` — model backends and environment variables
 
 ***************************
  Model backend quickstart
@@ -81,6 +90,7 @@ Recommended default: **OpenAI-compatible endpoints** using the ``oaic-`` prefix.
  Environment variables
 ***********************
 
+- ``CODESCRIBE_MODEL``: default model name used when ``-m`` is omitted.
 - ``OPENAI_API_KEY`` for ``openai-*``
 - ``ANTHROPIC_API_KEY`` for ``anthropic-*``
 - ``ANTHROPIC_BASE_URL`` (optional) for ``anthropic-*``

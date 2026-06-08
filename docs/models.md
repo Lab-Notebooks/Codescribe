@@ -43,11 +43,15 @@ ARGO is supported primarily for environments where the ARGO endpoint is availabl
 
 - Model prefix: `argo-...`
 - Env vars: `ARGO_USER`, `ARGO_API_ENDPOINT`
-- Tool calling: **no native tool calling**; agent mode uses the **text-protocol fallback**.
+- Tool calling: **no provider-native tool calling**; the backend uses a
+  **strict-JSON emulation** — tool schemas are injected into the system prompt
+  and the model is required to respond with a JSON object (`text` + `tool_calls`).
 
 ## Local Hugging Face / Transformers checkpoint (path)
 
 If `-m` is a filesystem path, Codescribe uses a local Transformers pipeline.
 
 - Model argument: path to a checkpoint directory
-- Tool calling: **no native tool calling**; agent mode uses the **text-protocol fallback**.
+- Tool calling: **no provider-native tool calling**; same **strict-JSON emulation**
+  as ARGO — schemas are injected into the system prompt and the model must
+  return a structured JSON object.
