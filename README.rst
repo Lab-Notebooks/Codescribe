@@ -60,7 +60,7 @@ Primary commands:
 Key flags:
 
 - ``agent --verbose/-v``: stream per-iteration tool calls to stdout.
-- ``agent --log / --log-path PATH``: write JSONL diagnostics to disk.
+- ``agent --log / --log-path PATH``: write TOML diagnostics to disk.
 - ``loop --workdir DIR``: set the root directory the agent is bounded to.
 - ``loop --agent-loops/-nloop N``: number of execution → review cycles (default 5).
 - ``loop --agent-iterations/-niter N``: tool-call budget per cycle (default 12).

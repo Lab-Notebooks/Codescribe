@@ -364,8 +364,8 @@ def prompt_agent(
     logfile = None
     if logging is not None:
         # If logging is passed as an empty string (e.g. CLI --log with no PATH),
-        # ToolLogJsonl will use its default location.
-        logfile = lib.ToolLogJsonl(path=str(logging) if str(logging) else None)
+        # ToolLogToml will use its default location.
+        logfile = lib.ToolLogToml(path=str(logging) if str(logging) else None)
 
     # Always use bounded tools rooted at the current working directory.
     tools = lib.make_tools(Path.cwd().resolve())
@@ -375,7 +375,6 @@ def prompt_agent(
         tools=tools,
         max_iterations=agent_iterations,
         show_diagnostics=verbose,
-        tool_output_max_chars=None,
         logging=logfile,
     )
     return coding_agent.run(task)

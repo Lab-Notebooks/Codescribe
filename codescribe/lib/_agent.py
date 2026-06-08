@@ -20,9 +20,10 @@ Available tools (high level):
 - write: create/overwrite a file
 
 Rules:
+- Before each set of tool calls, write one or two sentences stating what you are about to do and why. This reasoning is recorded in the loop transcript and helps reviewers understand your intent.
 - Use tools whenever you need to inspect files, run commands, or change the filesystem.
 - Do NOT fabricate tool outputs. If you need info, call a tool.
-- Prefer batching: if you need multiple reads/globs/commands, request them in the same turn.
+- You may batch multiple independent reads or globs in the same turn.
 - IMPORTANT: Only use the tools listed here. For shell work, ONLY use the bash tool and ONLY run commands that succeed under the bash tool's safety policy. If a command is blocked, pick an allowed alternative.
 - Avoid repeating identical tool calls with the same arguments unless the workspace changed (e.g., after an edit).
 - Before using edit, ensure you have read the exact file region you are changing.
@@ -34,8 +35,6 @@ Rules:
 _DEFAULT_MAX_TOOL_CALLS_TOTAL = 80
 _DEFAULT_MAX_TOOL_CALLS_PER_ITERATION = 8
 _DEFAULT_MAX_REPEATED_CALLS = 2
-_DEFAULT_ATTACH_RAW_THRESHOLD_CHARS = 1200
-_DEFAULT_WORKSPACE_CONTEXT_MAX_CHARS = 1800
 
 
 def _count_tokens(text: str) -> int:
@@ -170,7 +169,7 @@ def _parse_bash_exit_code(output: str) -> Optional[int]:
 
 
 def _summarize_tool_output(name: str, output: str) -> Tuple[str, bool]:
-    """Return (summary_text, should_attach_raw)."""
+    """Return (summary_text, attach_hint) — used only for the workspace context block."""
     out = output or ""
     out_s = out.strip()
 
@@ -208,85 +207,6 @@ def _summarize_tool_output(name: str, output: str) -> Tuple[str, bool]:
     return summary.strip(), False
 
 
-def _truncate_for_model(text: str, max_chars: Optional[int] = 4000) -> str:
-    """Compact tool output to fit within a model context budget.
-
-    If max_chars is None or <= 0, truncation is disabled.
-
-    This prefers line-aware compaction (keep head/tail lines) and falls back
-    to character slicing for extremely long single-line outputs.
-    """
-
-    if max_chars is None or max_chars <= 0:
-        return text
-    if len(text) <= max_chars:
-        return text
-
-    # Normalize newlines so line accounting is stable.
-    text_n = text.replace("\r\n", "\n").replace("\r", "\n")
-
-    # If it's essentially a single line (or very few), do a head/tail char slice.
-    if text_n.count("\n") <= 1:
-        head = max_chars // 2
-        tail = max_chars - head
-        omitted = len(text_n) - max_chars
-        return (
-            text_n[:head]
-            + f"\n\n...[truncated {omitted} chars]...\n\n"
-            + text_n[-tail:]
-        )
-
-    lines = text_n.split("\n")
-    total_lines = len(lines)
-
-    # Budget for the marker line and surrounding newlines.
-    marker_template = "...[truncated {omitted_lines} lines / {omitted_chars} chars]..."
-
-    # Start with a reasonable split, then adjust to fit.
-    head_lines = max(5, min(200, total_lines // 4))
-    tail_lines = max(5, min(200, total_lines // 4))
-
-    def render(h: int, t: int) -> str:
-        h = max(0, min(h, total_lines))
-        t = max(0, min(t, total_lines - h))
-        head_part = "\n".join(lines[:h])
-        tail_part = "\n".join(lines[-t:]) if t else ""
-        kept = (
-            head_part + ("\n" if head_part and (tail_part or True) else "") + tail_part
-        )
-        omitted_lines = max(0, total_lines - (h + t))
-        omitted_chars = max(0, len(text_n) - len(head_part) - len(tail_part))
-        marker = marker_template.format(
-            omitted_lines=omitted_lines, omitted_chars=omitted_chars
-        )
-        if tail_part:
-            return head_part + "\n\n" + marker + "\n\n" + tail_part
-        return head_part + "\n\n" + marker
-
-    out = render(head_lines, tail_lines)
-
-    # Shrink until within budget.
-    # Prefer shrinking tail first (often repetitive), then head.
-    while len(out) > max_chars and (head_lines > 1 or tail_lines > 1):
-        if tail_lines > 1:
-            tail_lines = max(1, int(tail_lines * 0.8))
-        elif head_lines > 1:
-            head_lines = max(1, int(head_lines * 0.8))
-        out = render(head_lines, tail_lines)
-
-    # If still too large (e.g., gigantic lines), fall back to safe char slicing.
-    if len(out) > max_chars:
-        head = max_chars // 2
-        tail = max_chars - head
-        omitted = len(text_n) - max_chars
-        return (
-            text_n[:head]
-            + f"\n\n...[truncated {omitted} chars]...\n\n"
-            + text_n[-tail:]
-        )
-
-    return out
-
 
 class Agent:
     """Standalone coding agent (native tools only)."""
@@ -303,7 +223,6 @@ class Agent:
         tools: Optional[List[lib.AgentTool]] = None,
         max_iterations: int = 20,
         show_diagnostics: bool = False,
-        tool_output_max_chars: Optional[int] = 4000,
         logging: Optional[Any] = None,
     ) -> None:
 
@@ -326,14 +245,11 @@ class Agent:
         self._tools: Dict[str, lib.AgentTool] = {t.name: copy.copy(t) for t in source}
         self.max_iterations = max_iterations
         self.show_diagnostics = show_diagnostics
-        self.tool_output_max_chars = tool_output_max_chars
 
         # Internal policy defaults (kept out of __init__ to avoid interface bloat)
         self._max_tool_calls_total = _DEFAULT_MAX_TOOL_CALLS_TOTAL
         self._max_tool_calls_per_iteration = _DEFAULT_MAX_TOOL_CALLS_PER_ITERATION
         self._max_repeated_calls = _DEFAULT_MAX_REPEATED_CALLS
-        self._attach_raw_threshold_chars = _DEFAULT_ATTACH_RAW_THRESHOLD_CHARS
-        self._workspace_context_max_chars = _DEFAULT_WORKSPACE_CONTEXT_MAX_CHARS
         # Per-run state
         self._state: Dict[str, Any] = {}
 
@@ -363,6 +279,7 @@ class Agent:
         *,
         run_id: Optional[str] = None,
         iteration: Optional[int] = None,
+        model_text: Optional[str] = None,
     ) -> str:
         t = lib.Timer()
         ok = True
@@ -397,6 +314,7 @@ class Agent:
                             "iteration": iteration,
                             "tool": name,
                             "args": args,
+                            "model_reasoning": model_text or None,
                         }
                     )
 
@@ -407,9 +325,12 @@ class Agent:
                         error = repr(exc)
                         output = f"Error: {exc}"
 
-        truncated = False
-        if self.tool_output_max_chars is not None and self.tool_output_max_chars > 0:
-            truncated = len(output) > self.tool_output_max_chars
+                    # Detect tools that signal failure via error-string return
+                    # rather than raising (e.g. "Error: file not found",
+                    # "Error: blocked shell syntax detected").
+                    if ok and _is_error_output(output):
+                        ok = False
+                        error = output.lstrip()[6:].strip()
 
         self._emit(
             {
@@ -421,7 +342,7 @@ class Agent:
                 "error": error,
                 "duration_ms": round(t.ms, 3),
                 "output_chars": len(output),
-                "output_truncated": truncated,
+                "output_preview": output[:500] if output else None,
             }
         )
 
@@ -435,10 +356,8 @@ class Agent:
             "recent_errors": [],
         }
 
-    def _record_tool_result(
-        self, name: str, args: Dict[str, Any], output: str
-    ) -> Tuple[str, bool]:
-        summary, should_attach_raw = _summarize_tool_output(name, output)
+    def _record_tool_result(self, name: str, args: Dict[str, Any], output: str) -> None:
+        summary, _ = _summarize_tool_output(name, output)
 
         rec = {
             "tool": name,
@@ -452,8 +371,6 @@ class Agent:
         if not rec["ok"]:
             self._state["recent_errors"].append(f"{name}: {summary[:400]}")
             self._state["recent_errors"] = self._state["recent_errors"][-5:]
-
-        return summary, should_attach_raw
 
     def _workspace_context_block(self, *, iteration: int, max_iterations: int) -> str:
         tool_calls_total = int(self._state.get("tool_calls_total", 0))
@@ -479,8 +396,7 @@ class Agent:
                 s = (s[:240] + "…") if len(s) > 240 else s
                 lines.append(f"  - {r['tool']}({r['args_preview']}): {s}")
 
-        out = "\n".join(lines).strip()
-        return _truncate_for_model(out, self._workspace_context_max_chars)
+        return "\n".join(lines).strip()
 
     @staticmethod
     def _upsert_workspace_context(messages: List[Dict[str, Any]], block: str) -> None:
@@ -588,6 +504,7 @@ class Agent:
                     "text_chars": len(text),
                     "tool_calls": len(tool_calls),
                     "usage": usage,
+                    "model_text": text[:500] if text else None,
                 }
             )
 
@@ -664,7 +581,8 @@ class Agent:
                         )
                     else:
                         output = self._execute(
-                            call_name, call_args, run_id=run_id, iteration=iteration + 1
+                            call_name, call_args, run_id=run_id, iteration=iteration + 1,
+                            model_text=text or None,
                         )
 
                     # Count only real tool executions against the total budget.
@@ -673,9 +591,7 @@ class Agent:
                             int(self._state.get("tool_calls_total", 0)) + 1
                         )
 
-                    summary, should_attach_raw = self._record_tool_result(
-                        call_name, call_args, output
-                    )
+                    self._record_tool_result(call_name, call_args, output)
 
                     # If workspace changed, allow repeats again (read-after-edit, re-run bash, etc.).
                     if (not _is_error_output(output or "")) and call_name in (
@@ -684,16 +600,9 @@ class Agent:
                     ):
                         self._state["call_counts"] = {}
 
-                    attach_raw = should_attach_raw or (
-                        len(output) <= self._attach_raw_threshold_chars
-                    )
-                    if attach_raw:
-                        raw = _truncate_for_model(output, self.tool_output_max_chars)
-                        payload = summary + "\n\nRAW:\n" + raw
-                    else:
-                        payload = summary
-
-                    outputs.append(payload)
+                    # Pass the full tool output to the model as-is — no summarization,
+                    # no truncation, no RAW: wrapper.
+                    outputs.append(output)
                     executed_calls.append(call)
 
                     if self.show_diagnostics:
@@ -749,12 +658,19 @@ class Agent:
 
             if not empty_reply_nudged:
                 empty_reply_nudged = True
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": "Reply with either tool_calls (to take an action) or a final answer as text.",
-                    }
-                )
+                recent_errors = self._state.get("recent_errors", [])
+                if any("JSON" in e or "not valid JSON" in e for e in recent_errors):
+                    nudge = (
+                        "Your last tool call could not be parsed because the arguments "
+                        "were not valid JSON. Please re-emit the tool call with a properly "
+                        "formed JSON object matching the tool schema."
+                    )
+                else:
+                    nudge = (
+                        "Reply with either tool_calls (to take an action) "
+                        "or a final answer as text."
+                    )
+                messages.append({"role": "user", "content": nudge})
                 continue
 
         if self.show_diagnostics:

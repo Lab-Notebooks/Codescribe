@@ -1,67 +1,85 @@
 """_loop
 
-Prompt-loop implementation + durable loop state helpers.
+Prompt-loop implementation with in-memory cross-loop state.
 
-This module intentionally owns *loop-specific* state, prompts, and persistence.
-Telemetry/diagnostics sinks live in `_telemetry.py`.
+State relay design:
+  - Within a loop (iteration → iteration): message history + WORKSPACE CONTEXT block.
+  - Across loops (loop N → loop N+1): Python objects held in prompt_loop().
+    The harness computes LoopSummary from the TOML event log after each execution
+    and injects it directly into the next loop's task string.
+    Agents never read state files to orient themselves.
+
+Persistent files (for inspection / crash-resume only):
+  run.toml        — run configuration
+  state.toml      — current loop index + phase
+  execution.toml  — raw event log for the most recent execution phase
+  review_output.toml — structured output from the review agent (pending items)
 """
 
 from __future__ import annotations
 
 import os
-import json
-from dataclasses import dataclass
-from datetime import datetime, timezone
+import toml
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from codescribe import lib
 
 
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
 @dataclass
 class LoopPaths:
-    """Single-shared loop paths under `.codescribe/loop/`.
-
-    We intentionally keep these files *shared* (not per-run) for now.
-    """
+    """Paths under `.codescribe/loop/` for a single shared run."""
 
     run_dir: Path
-    run_json: Path
-    state_json: Path
-
-    # Execution phase artifacts (overwritten each loop)
-    execution_jsonl: Path
-    previous_md: Path
-
-    # Review artifacts
-    history_md: Path
-    plan_md: Path
+    run_toml: Path
+    state_toml: Path
+    execution_toml: Path       # raw event log (overwritten each execution phase)
+    review_output_toml: Path   # review agent's structured output (overwritten each review)
 
 
 def get_loop_paths(workdir: Path) -> LoopPaths:
     run_dir = workdir / ".codescribe" / "loop"
     return LoopPaths(
         run_dir=run_dir,
-        run_json=run_dir / "run.json",
-        state_json=run_dir / "state.json",
-        execution_jsonl=run_dir / "execution.jsonl",
-        previous_md=run_dir / "previous.md",
-        history_md=run_dir / "history.md",
-        plan_md=run_dir / "plan.md",
+        run_toml=run_dir / "run.toml",
+        state_toml=run_dir / "state.toml",
+        execution_toml=run_dir / "execution.toml",
+        review_output_toml=run_dir / "review_output.toml",
     )
+
+
+# ---------------------------------------------------------------------------
+# State persistence (TOML)
+# ---------------------------------------------------------------------------
+
+_VALID_PHASES = frozenset({"idle", "execution", "review"})
 
 
 def load_state(path: Path) -> Optional[Dict[str, Any]]:
     if not path.exists():
         return None
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    data = lib.read_toml(path)
+    return data or None
 
 
 def write_state(path: Path, state: Dict[str, Any]) -> None:
     state = dict(state)
+    run_id = state.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError(f"state['run_id'] must be a non-empty str, got {run_id!r}")
+    loop_index = state.get("loop_index")
+    if not isinstance(loop_index, int) or isinstance(loop_index, bool):
+        raise ValueError(f"state['loop_index'] must be an int, got {loop_index!r}")
+    phase = state.get("phase")
+    if phase not in _VALID_PHASES:
+        raise ValueError(f"state['phase'] must be one of {sorted(_VALID_PHASES)}, got {phase!r}")
     state["updated_at"] = lib.iso_utc_now()
-    lib.atomic_write_json(path, state)
+    lib.atomic_write_toml(path, state)
 
 
 def _init_state(*, run_id: str, workdir: Path, task_file: Path) -> Dict[str, Any]:
@@ -70,207 +88,180 @@ def _init_state(*, run_id: str, workdir: Path, task_file: Path) -> Dict[str, Any
         "workdir": str(workdir),
         "task_file": str(task_file),
         "loop_index": 0,
-        "phase": "idle",  # idle|execution|review
+        "phase": "idle",
         "updated_at": lib.iso_utc_now(),
     }
 
 
-def _fmt_int(n: Optional[int]) -> str:
-    return "?" if n is None else f"{int(n):,}"
+# ---------------------------------------------------------------------------
+# In-memory cross-loop state
+# ---------------------------------------------------------------------------
 
+@dataclass
+class LoopSummary:
+    """Harness-computed summary of one execution phase.
 
-def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
-    if not path.exists():
-        return []
-    out: List[Dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                out.append(json.loads(line))
-            except Exception:
-                # Best-effort: keep going even if one line is corrupt.
-                continue
-    return out
-
-
-def _render_previous_md(*, events: List[Dict[str, Any]], final_text: str) -> str:
-    """Render console-like verbose transcript as markdown.
-
-    Source of truth is the agent's JSONL log (ToolLogJsonl events).
+    Built deterministically from the TOML event log — no LLM involved.
+    Carried in-memory by prompt_loop() and injected into subsequent task prompts.
     """
 
-    # Group events by iteration.
-    by_iter: Dict[int, Dict[str, Any]] = {}
+    loop_index: int
+    files_written: List[str] = field(default_factory=list)
+    files_edited: List[str] = field(default_factory=list)
+    commands_run: List[str] = field(default_factory=list)   # "cmd → exit_code N"
+    errors: List[str] = field(default_factory=list)
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
 
-    total_in: Optional[int] = None
-    total_out: Optional[int] = None
 
-    for ev in events:
-        it = ev.get("iteration")
-        if isinstance(it, int) and it >= 1:
-            by_iter.setdefault(it, {"usage": None, "tools": []})
+def _compute_loop_summary(loop_index: int, events: List[Dict[str, Any]]) -> LoopSummary:
+    """Build a LoopSummary from TOML event log entries."""
 
-        if ev.get("event") == "model_response":
-            usage = ev.get("usage") or {}
-            in_tok = usage.get("prompt_tokens", usage.get("input_tokens"))
-            out_tok = usage.get("completion_tokens", usage.get("output_tokens"))
-            if isinstance(it, int) and it >= 1:
-                by_iter[it]["usage"] = (in_tok, out_tok)
-
-        if ev.get("event") == "tool_end":
-            tool = ev.get("tool")
-            ok = ev.get("ok")
-            err = ev.get("error")
-            # args preview isn't in tool_end; we use tool_start if available.
-            # We'll stitch a best-effort args_preview by looking backwards.
-            args_preview = None
-            if isinstance(it, int) and it >= 1:
-                by_iter[it]["tools"].append(
-                    {
-                        "tool": tool,
-                        "ok": ok,
-                        "error": err,
-                        "duration_ms": ev.get("duration_ms"),
-                        "output_chars": ev.get("output_chars"),
-                    }
-                )
-
-        if ev.get("event") == "run_end":
-            total_in = ev.get("total_input_tokens")
-            total_out = ev.get("total_output_tokens")
-
-    # We also want tool argument previews. These are in tool_start events.
-    # Add them onto the *next* tool_end in the same iteration (best-effort).
-    pending_starts: Dict[int, List[Dict[str, Any]]] = {}
+    # Collect args previews keyed by tool_start order within each iteration.
+    # Map: iteration → list of (tool, args_preview) in call order.
+    starts: Dict[int, List[tuple]] = {}
     for ev in events:
         if ev.get("event") != "tool_start":
             continue
         it = ev.get("iteration")
-        if not isinstance(it, int) or it < 1:
+        if not isinstance(it, int):
             continue
-        pending_starts.setdefault(it, []).append(ev)
-
-    # Build a map iteration -> queue of args previews.
-    args_q: Dict[int, List[str]] = {}
-    for it, starts in pending_starts.items():
-        args_q[it] = []
-        for s in starts:
-            tool = s.get("tool")
-            args = s.get("args") or {}
-            if isinstance(args, dict):
-                # Mirror the same preview style as the agent console.
-                if tool == "bash":
-                    cmd = (args.get("command") or "").replace("\n", " ").strip()
-                    args_q[it].append((cmd[:60] + "…") if len(cmd) > 60 else cmd)
-                elif tool in ("read", "write"):
-                    args_q[it].append(str(args.get("path", "")))
-                elif tool == "edit":
-                    path = str(args.get("path", ""))
-                    n = len(args.get("edits") or [])
-                    args_q[it].append(f"{path}  ({n} edit{'s' if n != 1 else ''})")
-                else:
-                    args_q[it].append(json.dumps(args, ensure_ascii=False)[:60])
-            else:
-                args_q[it].append(str(args))
-
-    lines: List[str] = []
-
-    for it in sorted(by_iter.keys()):
-        usage = by_iter[it].get("usage")
-        lines.append(f"iter {it}")
-        if usage and isinstance(usage, tuple) and len(usage) == 2:
-            in_tok, out_tok = usage
-            total = (in_tok or 0) + (out_tok or 0)
-            lines.append(
-                f"  usage  in {_fmt_int(in_tok)}  out {_fmt_int(out_tok)}  total {_fmt_int(total)}"
-            )
-        tools_list = by_iter[it].get("tools") or []
-        for tool_ev in tools_list:
-            tool = tool_ev.get("tool") or "?"
-            args_preview = ""
-            if it in args_q and args_q[it]:
-                args_preview = args_q[it].pop(0)
-            ok = tool_ev.get("ok")
-            err = tool_ev.get("error")
-
-            suffix = ""
+        tool = ev.get("tool") or "?"
+        args = ev.get("args") or {}
+        if isinstance(args, dict):
             if tool == "bash":
-                # bash tool outputs embed exit_code on line1 in actual tool output,
-                # but we don't have tool output here. We'll print ok/error.
-                suffix = "bash ok" if ok else "bash error"
-            elif tool in ("read", "write", "edit", "glob"):
-                suffix = "ok" if ok else "error"
+                ap = (args.get("command") or "").replace("\n", " ").strip()[:80]
+            elif tool in ("read", "write"):
+                ap = str(args.get("path", ""))
+            elif tool == "edit":
+                ap = str(args.get("path", ""))
             else:
-                suffix = "ok" if ok else "error"
+                ap = ""
+        else:
+            ap = str(args)[:60]
+        starts.setdefault(it, []).append((tool, ap))
 
-            if err:
-                suffix = f"error={err}"
+    # Consume starts queue as we process tool_end events.
+    starts_q: Dict[int, List[tuple]] = {k: list(v) for k, v in starts.items()}
 
-            # console-ish alignment similar to your sample
-            lines.append(f"  ▸ {tool:<5}  {args_preview:<60}  {suffix}")
+    summary = LoopSummary(loop_index=loop_index)
 
-        lines.append("")
+    for ev in events:
+        if ev.get("event") == "tool_end":
+            it = ev.get("iteration")
+            tool = ev.get("tool") or "?"
+            preview = (ev.get("output_preview") or "").strip()
+            output_is_error = preview.startswith("Error:")
+            ok = ev.get("ok") and not output_is_error
 
-    if total_in is not None or total_out is not None:
-        total = (total_in or 0) + (total_out or 0)
-        lines.append(
-            f"tokens  in {_fmt_int(total_in)}  out {_fmt_int(total_out)}  total {_fmt_int(total)}"
-        )
-        lines.append("")
+            ap = ""
+            if isinstance(it, int) and starts_q.get(it):
+                _, ap = starts_q[it].pop(0)
 
-    if final_text:
-        lines.append("<final_answer>")
-        lines.append(final_text.rstrip())
-        lines.append("</final_answer>")
-        lines.append("")
+            if not ok:
+                err_msg = preview[:80] if preview else (ev.get("error") or "unknown error")
+                summary.errors.append(f"{tool}({ap}): {err_msg}")
+            elif tool == "write":
+                summary.files_written.append(ap)
+            elif tool == "edit":
+                summary.files_edited.append(ap)
+            elif tool == "bash":
+                first = (preview.splitlines() or [""])[0][:60]
+                summary.commands_run.append(f"{ap}  →  {first}")
 
-    return "\n".join(lines).rstrip() + "\n"
+        elif ev.get("event") == "run_end":
+            summary.total_input_tokens = int(ev.get("total_input_tokens") or 0)
+            summary.total_output_tokens = int(ev.get("total_output_tokens") or 0)
+
+    return summary
+
 
 # ---------------------------------------------------------------------------
-# Prompt builders (system + phase tasks)
+# Prompt builders
 # ---------------------------------------------------------------------------
-
 
 def build_system_prompt(*, workdir: Path) -> str:
     return (
         "You are an autonomous coding agent specializing in test-driven repair. "
-        "Infer project state from files and command output within the working directory. "
+        "NEVER fabricate command results, test output, or file contents — "
+        "if you need information, read a file or run a command and report verbatim output. "
+        "Determine project state by reading files and running commands; never assume or infer. "
         "IMPORTANT: Only access files and paths within the working directory. "
         "In bash commands, only use relative paths or paths under the working directory. "
         "Never target system directories or paths outside the working directory. "
-        "NEVER fabricate test output or command results — always run actual commands "
-        "and report their real output verbatim. "
         "Avoid unnecessary file re-reads, but re-read whenever you need exact text, "
         "line context, or verification before/after edits."
     )
+
+
+def _fmt_loop_context(
+    *,
+    loop_idx: int,
+    agent_loops: int,
+    loop_summaries: List[LoopSummary],
+    pending_items: List[str],
+) -> str:
+    """Build the injected context block that orients the execution agent.
+
+    This replaces the agent having to read state/history/plan files.
+    """
+    lines = [f"Loop {loop_idx} of {agent_loops}."]
+
+    if loop_summaries:
+        last = loop_summaries[-1]
+        parts: List[str] = []
+        if last.files_written:
+            parts.append("wrote: " + ", ".join(last.files_written))
+        if last.files_edited:
+            parts.append("edited: " + ", ".join(last.files_edited))
+        if last.commands_run:
+            parts.append("ran: " + "; ".join(last.commands_run))
+        if last.errors:
+            parts.append("errors: " + "; ".join(last.errors[:3]))
+        if parts:
+            lines.append("Last loop — " + " | ".join(parts) + ".")
+
+    if pending_items:
+        lines.append("Pending next steps:")
+        for item in pending_items[:5]:
+            lines.append(f"  - {item}")
+    else:
+        lines.append("No pending steps recorded — determine next action from the task file.")
+
+    return "\n".join(lines)
 
 
 def build_execution_task(
     *,
     workdir: Path,
     task_rel: str,
-    state_rel: str,
-    history_rel: str,
-    plan_rel: str,
+    loop_idx: int,
+    agent_loops: int,
+    loop_summaries: List[LoopSummary],
+    pending_items: List[str],
 ) -> str:
+    context = _fmt_loop_context(
+        loop_idx=loop_idx,
+        agent_loops=agent_loops,
+        loop_summaries=loop_summaries,
+        pending_items=pending_items,
+    )
     return (
+        f"{context}\n\n"
         f"Working directory: {workdir}\n"
-        f"Task file: {task_rel} (read-only)\n"
-        f"Loop state (json): {state_rel} (read + update)\n"
-        f"History: {history_rel} (read-only; may be large)\n"
-        f"Current plan: {plan_rel} (read-only)\n\n"
+        f"Task file: {task_rel} (read-only — contains the full specification)\n\n"
         "PHASE: EXECUTION\n\n"
-        "Goal: make the most useful concrete progress on the task, guided by plan.md.\n\n"
+        "Goal: make the most useful concrete progress on the task.\n\n"
         "Protocol:\n"
-        "1. Read the task file, plan.md (if it exists), and state.json.\n"
-        "2. Do the next planned step (or propose a better one if plan is empty/wrong).\n"
-        "3. Use tools to inspect/edit files and run checks.\n"
-        "4. Run the closest available check (tests, lint, typecheck). If none, run `python -m compileall .`.\n"
-        "5. Update state.json with loop_index/phase only (or add small keys if truly needed).\n\n"
-        "Finish with <final_answer> describing what you did and what you observed.\n"
+        "1. Read the task file to orient yourself on the specification.\n"
+        "2. Before each set of tool calls, write one or two sentences stating what you are about to do and why.\n"
+        "3. Inspect the current state of relevant files before editing them.\n"
+        "4. Do the work described in the pending next steps (or the highest-value action if none are listed).\n"
+        "5. Run the closest available check (tests, lint, typecheck). If none, run `python -m compileall .`.\n\n"
+        "Finish with <final_answer> that includes:\n"
+        "- Exact output of every command you ran (verbatim, not paraphrased).\n"
+        "- A bulleted list of NEXT STEPS (3-5 concrete items) for the following loop.\n"
+        "  Begin that section with the exact line: NEXT STEPS:\n"
     )
 
 
@@ -278,38 +269,63 @@ def build_review_task(
     *,
     workdir: Path,
     task_rel: str,
-    state_rel: str,
-    previous_rel: str,
-    history_rel: str,
-    plan_rel: str,
+    review_output_rel: str,
     loop_index: int,
+    loop_summary: LoopSummary,
 ) -> str:
+    # Build a text representation of the harness-computed summary so the
+    # review agent has verified facts without needing to parse any transcript.
+    summary_lines = [f"## Verified actions from loop {loop_index} (harness-computed)"]
+    if loop_summary.files_written:
+        summary_lines.append("Files written: " + ", ".join(loop_summary.files_written))
+    if loop_summary.files_edited:
+        summary_lines.append("Files edited: " + ", ".join(loop_summary.files_edited))
+    if loop_summary.commands_run:
+        summary_lines.append("Commands run:")
+        for c in loop_summary.commands_run:
+            summary_lines.append(f"  {c}")
+    if loop_summary.errors:
+        summary_lines.append("Errors:")
+        for e in loop_summary.errors:
+            summary_lines.append(f"  {e}")
+    if not (loop_summary.files_written or loop_summary.files_edited
+            or loop_summary.commands_run or loop_summary.errors):
+        summary_lines.append("  (no verified actions)")
+    verified_block = "\n".join(summary_lines)
+
     return (
         f"Working directory: {workdir}\n"
         f"Task file: {task_rel} (read-only)\n"
-        f"Loop state (json): {state_rel} (read + update)\n"
-        f"Previous execution transcript: {previous_rel} (read-only)\n"
-        f"History log: {history_rel} (append-only)\n"
-        f"Plan file: {plan_rel} (overwrite/update)\n\n"
+        f"Review output: {review_output_rel} (write here)\n\n"
         "PHASE: REVIEW\n\n"
-        "You are the review agent. Your job is to:\n"
-        "1) Read previous.md and extract what happened (tool actions, errors, files changed, outcomes).\n"
-        "2) Append a concise summary to history.md.\n"
-        "3) Produce/refresh plan.md: concrete next steps for the execution agent.\n\n"
+        f"{verified_block}\n\n"
+        "Your job:\n"
+        "1. Read the task file to recall the specification.\n"
+        "2. Read the execution agent's <final_answer> (if provided above) for its self-reported results.\n"
+        "3. Cross-reference the final_answer claims against the verified actions above.\n"
+        "   Flag any claim not backed by a verified action as unverified.\n"
+        "4. Write your assessment to the review output file in TOML format:\n\n"
+        "   ```toml\n"
+        f"   loop = {loop_index}\n"
+        "   summary = \"One paragraph describing what actually happened.\"\n"
+        "   blocker = \"Main current blocker, or empty string if none.\"\n\n"
+        "   [[pending]]\n"
+        "   item = \"First concrete next step\"\n\n"
+        "   [[pending]]\n"
+        "   item = \"Second concrete next step\"\n"
+        "   ```\n\n"
         "Rules:\n"
-        "- Ground summaries in what is actually in previous.md. Do not fabricate results.\n"
-        "- The plan must be actionable and ordered (bulleted checklist is fine).\n"
-        "- Keep history entries short (aim ~10-25 lines).\n\n"
-        f"When writing history.md, append a new section headed: ## loop {loop_index}\n"
-        "When writing plan.md, overwrite the whole file with the current best plan.\n\n"
-        "Finish with <final_answer> confirming you updated history.md and plan.md.\n"
+        "- pending items must be concrete and actionable (not 'continue working').\n"
+        "- Limit to 5 pending items maximum.\n"
+        "- Do not claim success for anything not in the verified actions list.\n\n"
+        "Finish with <final_answer> confirming you wrote the review output file.\n"
     )
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # prompt_loop command
 # ---------------------------------------------------------------------------
-
 
 def _ensure_within_workdir(path: Path, workdir: Path) -> Path:
     path = path.resolve()
@@ -321,6 +337,32 @@ def _ensure_within_workdir(path: Path, workdir: Path) -> Path:
     return path
 
 
+def _extract_pending_items(final_text: str) -> List[str]:
+    """Parse NEXT STEPS: section from an execution agent's final_answer."""
+    items: List[str] = []
+    in_section = False
+    for line in (final_text or "").splitlines():
+        if line.strip().upper().startswith("NEXT STEPS"):
+            in_section = True
+            continue
+        if in_section:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # Stop at the next markdown heading
+            if stripped.startswith("#"):
+                break
+            if stripped.startswith("-") or stripped.startswith("*"):
+                items.append(stripped.lstrip("-* ").strip())
+            elif stripped[0].isdigit() and stripped[1:3] in (". ", ") "):
+                items.append(stripped[2:].strip() if len(stripped) > 2 else stripped)
+    return items[:5]
+
+
+def _read_review_output(path: Path) -> Dict[str, Any]:
+    """Read the review agent's structured TOML output."""
+    data = lib.read_toml(path)
+    return data
 
 
 def prompt_loop(
@@ -332,18 +374,21 @@ def prompt_loop(
     logging: Optional[Union[Path, str]] = None,
     workdir: Optional[Union[Path, str]] = None,
 ) -> str:
-    """Run a bounded execution→review loop.
+    """Run a bounded execution → review loop.
+
+    Cross-loop state is carried entirely in-memory (loop_summaries, pending_items).
+    Agents receive context injected into their task strings — they do not read
+    state or history files to orient themselves.
 
     Per loop:
-      1) EXECUTION agent performs the next step and produces a final answer.
-      2) REVIEW agent summarizes `previous.md` into `history.md` and updates `plan.md`.
+      1) EXECUTION agent: reads task file + does work + reports NEXT STEPS.
+      2) REVIEW agent: receives harness-computed action summary + writes review_output.toml.
 
-    Artifacts under `.codescribe/loop/` (single shared):
-      - previous.md (overwritten each loop)
-      - history.md (appended each loop)
-      - plan.md (overwritten each loop)
-      - execution.jsonl (raw structured log for the most recent execution phase)
-      - run.json, state.json
+    Persistent files under `.codescribe/loop/` (for inspection / crash-resume):
+      run.toml             — run configuration
+      state.toml           — current loop index + phase
+      execution.toml       — raw TOML event log for the most recent execution phase
+      review_output.toml   — review agent's structured output
     """
 
     workdir_path = Path(workdir).resolve() if workdir else Path.cwd().resolve()
@@ -351,11 +396,6 @@ def prompt_loop(
 
     neural_model = lib.set_neural_model(model)  # type: ignore[attr-defined]
 
-    # Task file is a TOML chat prompt. Also supports optional:
-    #
-    #   [tools]
-    #   bash = ["python3.8", "rg"]
-    #
     chat_history, meta = lib.load_chat_template(task_path, return_meta=True)
     bash_allow = set((meta.get("tools") or {}).get("bash") or [])
     tools = lib.make_tools(workdir_path, bash_allow=bash_allow)
@@ -365,13 +405,10 @@ def prompt_loop(
     os.makedirs(paths.run_dir, exist_ok=True)
 
     task_rel = str(task_path.relative_to(workdir_path))
-    state_rel = str(paths.state_json.relative_to(workdir_path))
-    history_rel = str(paths.history_md.relative_to(workdir_path))
-    plan_rel = str(paths.plan_md.relative_to(workdir_path))
-    previous_rel = str(paths.previous_md.relative_to(workdir_path))
+    review_output_rel = str(paths.review_output_toml.relative_to(workdir_path))
 
-    lib.atomic_write_json(
-        paths.run_json,
+    lib.atomic_write_toml(
+        paths.run_toml,
         {
             "run_id": run_id,
             "created_at": lib.iso_utc_now(),
@@ -384,14 +421,20 @@ def prompt_loop(
     )
 
     state = _init_state(run_id=run_id, workdir=workdir_path, task_file=task_path)
-    write_state(paths.state_json, state)
+    write_state(paths.state_toml, state)
 
     system = build_system_prompt(workdir=workdir_path)
+
+    # -----------------------------------------------------------------
+    # In-memory cross-loop state — never written to files between loops.
+    # -----------------------------------------------------------------
+    loop_summaries: List[LoopSummary] = []
+    pending_items: List[str] = []
 
     loops_completed = 0
 
     for loop_idx in range(1, agent_loops + 1):
-        # Reload prompt in case user edits it while loop runs.
+        # Reload task prompt in case user edits it while the loop runs.
         chat_history, meta = lib.load_chat_template(task_path, return_meta=True)
 
         # ----------------------
@@ -400,43 +443,46 @@ def prompt_loop(
         if verbose:
             print(f"\n▶  loop {loop_idx} [execution]")
 
-        state = load_state(paths.state_json) or state
         state["run_id"] = run_id
         state["loop_index"] = loop_idx
         state["phase"] = "execution"
-        write_state(paths.state_json, state)
+        write_state(paths.state_toml, state)
 
-        # Execution JSONL log (this is the source-of-truth for previous.md).
-        exec_log = lib.ToolLogJsonl(path=str(paths.execution_jsonl))
+        # Clear the TOML event log so it contains only this loop's events.
+        lib.atomic_write_text(paths.execution_toml, "")
 
-        # Optional extra logging sink provided by CLI.
-        # (We do not merge sinks here; if requested later, we can add a MultiSink.)
+        exec_log: lib.ToolLogSink = lib.ToolLogToml(path=str(paths.execution_toml))
         if logging is not None:
-            exec_log = lib.ToolLogJsonl(path=str(logging) if str(logging) else None)
+            extra_log = lib.ToolLogToml(path=str(logging) if str(logging) else None)
+            exec_log = lib.MultiToolLogSink([exec_log, extra_log])
 
         exec_agent = lib.Agent(
             neural_model,
             tools=tools,
             max_iterations=agent_iterations,
             show_diagnostics=verbose,
-            tool_output_max_chars=None,
             logging=exec_log,
         )
 
         exec_task = build_execution_task(
             workdir=workdir_path,
             task_rel=task_rel,
-            state_rel=state_rel,
-            history_rel=history_rel,
-            plan_rel=plan_rel,
+            loop_idx=loop_idx,
+            agent_loops=agent_loops,
+            loop_summaries=loop_summaries,
+            pending_items=pending_items,
         )
 
         exec_answer = exec_agent.run(exec_task, system=system, chat_history=chat_history)
 
-        # Render previous.md from the execution JSONL.
-        events = _read_jsonl(paths.execution_jsonl)
-        prev_md = _render_previous_md(events=events, final_text=exec_answer or "")
-        lib.atomic_write_text(paths.previous_md, prev_md)
+        # Compute the loop summary from the TOML event log (deterministic — no LLM).
+        events = lib.read_toml_events(paths.execution_toml)
+        loop_summary = _compute_loop_summary(loop_idx, events)
+        loop_summaries.append(loop_summary)
+
+        # Optimistically extract NEXT STEPS from the final answer so the review
+        # agent has a starting point even if it can't improve on them.
+        pending_items = _extract_pending_items(exec_answer or "")
 
         loops_completed = loop_idx
 
@@ -446,37 +492,50 @@ def prompt_loop(
         if verbose:
             print(f"\n▶  loop {loop_idx} [review]")
 
-        state = load_state(paths.state_json) or state
-        state["run_id"] = run_id
-        state["loop_index"] = loop_idx
         state["phase"] = "review"
-        write_state(paths.state_json, state)
+        write_state(paths.state_toml, state)
 
+        # Review agent only needs to read files and write review_output.toml.
+        review_tools = [t for t in tools if t.name in ("read", "glob", "write")]
         review_agent = lib.Agent(
             neural_model,
-            tools=tools,
+            tools=review_tools,
             max_iterations=max(6, agent_iterations // 2),
             show_diagnostics=verbose,
-            tool_output_max_chars=None,
-            logging=lib.ToolLogJsonl(path=str(paths.run_dir / "review.jsonl")),
+            logging=lib.ToolLogToml(path=str(paths.run_dir / "review.toml")),
         )
 
         review_task = build_review_task(
             workdir=workdir_path,
             task_rel=task_rel,
-            state_rel=state_rel,
-            previous_rel=previous_rel,
-            history_rel=history_rel,
-            plan_rel=plan_rel,
+            review_output_rel=review_output_rel,
             loop_index=loop_idx,
+            loop_summary=loop_summary,
         )
 
-        _ = review_agent.run(review_task, system=system, chat_history=chat_history)
+        # Pass the execution agent's final answer as a user message so the
+        # review agent can cross-check claims against the verified summary.
+        review_history = list(chat_history or [])
+        if exec_answer:
+            review_history.append({"role": "assistant", "content": exec_answer})
+
+        _ = review_agent.run(review_task, system=system, chat_history=review_history)
+
+        # Read the review agent's structured output and update in-memory state.
+        review_data = _read_review_output(paths.review_output_toml)
+        if review_data:
+            raw_pending = review_data.get("pending") or []
+            if isinstance(raw_pending, list):
+                reviewed_items = [
+                    p.get("item", "") if isinstance(p, dict) else str(p)
+                    for p in raw_pending
+                    if p
+                ]
+                if reviewed_items:
+                    pending_items = [x for x in reviewed_items if x]
 
     return (
         f"completed {loops_completed}/{agent_loops} loop(s) "
         f"— run: {run_id} "
-        f"— previous: {paths.previous_md} "
-        f"— history: {paths.history_md} "
-        f"— plan: {paths.plan_md}"
+        f"— artifacts: {paths.run_dir}"
     )

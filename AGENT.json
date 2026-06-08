@@ -68,26 +68,24 @@
       {
         "command": "loop",
         "bounded": true,
-        "description": "Repeated execution→review cycles. Each cycle starts a fresh agent session bounded to the working directory. State is persisted under .codescribe/loop/.",
+        "description": "Repeated execution→review cycles. Cross-loop state is carried in-memory; each cycle starts a fresh agent whose context is injected by the harness. On-disk artifacts under .codescribe/loop/ are for inspection and crash-resume only.",
         "options": {
           "--workdir DIR": "Root directory the agent is bounded to (default: cwd)",
           "--agent-loops/-nloop N": "Number of execution→review cycles (default: 5)",
           "--agent-iterations/-niter N": "Tool-call budget per cycle (default: 12)"
         },
         "artifacts": [
-          ".codescribe/loop/run.json",
-          ".codescribe/loop/state.json",
-          ".codescribe/loop/execution.jsonl",
-          ".codescribe/loop/previous.md",
-          ".codescribe/loop/history.md",
-          ".codescribe/loop/plan.md",
-          ".codescribe/loop/review.jsonl"
+          ".codescribe/loop/run.toml",
+          ".codescribe/loop/state.toml",
+          ".codescribe/loop/execution.toml",
+          ".codescribe/loop/review_output.toml",
+          ".codescribe/loop/review.toml"
         ]
       },
       {
         "command": "agent",
         "bounded": false,
-        "description": "Single agent session with unbounded tools (use with care). Supports --verbose/-v to stream tool calls to stdout and --log/--log-path to write JSONL diagnostics."
+        "description": "Single agent session with unbounded tools (use with care). Supports --verbose/-v to stream tool calls to stdout and --log/--log-path to write TOML diagnostics."
       }
     ],
     "notes": [

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, List
 
 import hashlib
+import toml
 
 from codescribe import lib
 
@@ -58,12 +59,7 @@ def iso_utc_now() -> str:
 
 
 def new_run_id() -> str:
-    """Generate a stable, human-friendly run id.
-
-    Note: We keep the prior `_loop.py` format because it produces sortable run
-    directories (timestamp prefix).
-    """
-
+    """Generate a stable, human-friendly run id."""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     return f"{stamp}-{secrets.token_hex(3)}"
 
@@ -77,25 +73,100 @@ def atomic_write_text(path: Path, text: str) -> None:
     os.replace(tmp, path)
 
 
-def atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
-    """Atomically write JSON to *path*."""
-    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+def atomic_write_toml(path: Path, payload: Dict[str, Any]) -> None:
+    """Atomically write a TOML document to *path*."""
+    atomic_write_text(path, toml.dumps(payload))
 
 
-def append_jsonl(path: Path, payload: Dict[str, Any]) -> None:
-    """Append one JSON object as a single line (JSONL)."""
-    os.makedirs(path.parent, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
-
-
-def _json_safe(obj: Any) -> Any:
-    """Best-effort conversion for JSON serialization."""
+def read_toml(path: Path) -> Dict[str, Any]:
+    """Read a TOML file, returning an empty dict if missing or unreadable."""
+    if not path.exists():
+        return {}
     try:
-        json.dumps(obj)
-        return obj
+        with open(path, "r", encoding="utf-8") as fh:
+            return toml.load(fh)
     except Exception:
-        return repr(obj)
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# TOML event log (replaces JSONL)
+# ---------------------------------------------------------------------------
+
+def _toml_val(v: Any) -> Optional[str]:
+    """Serialize a value to its TOML literal representation.
+
+    Returns None for None (caller should skip the field).
+    Complex types (dict, list) are JSON-encoded and stored as TOML strings.
+    """
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        return str(round(v, 6))
+    if isinstance(v, str):
+        if "\n" in v or "\r" in v:
+            # Multiline literal string — no escaping needed unless it contains '''
+            if "'''" not in v:
+                return f"'''\n{v}'''"
+            # Fall back to escaped basic string
+            esc = (
+                v.replace("\\", "\\\\")
+                 .replace('"', '\\"')
+                 .replace("\n", "\\n")
+                 .replace("\r", "\\r")
+            )
+            return f'"{esc}"'
+        esc = v.replace("\\", "\\\\").replace('"', '\\"').replace("\t", "\\t")
+        return f'"{esc}"'
+    # dict, list → JSON-encode, then store as TOML string
+    encoded = json.dumps(v, ensure_ascii=False)
+    esc = encoded.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'"{esc}"'
+
+
+def append_toml_event(path: Path, event: Mapping[str, Any]) -> None:
+    """Append one event as a [[event]] block to a TOML log file."""
+    os.makedirs(path.parent, exist_ok=True)
+    lines = ["\n[[event]]"]
+    for k, v in event.items():
+        rendered = _toml_val(v)
+        if rendered is not None:
+            lines.append(f"{k} = {rendered}")
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def read_toml_events(path: Path) -> List[Dict[str, Any]]:
+    """Read all [[event]] entries from a TOML log file.
+
+    JSON-encoded string values (written by append_toml_event for complex types
+    like args/usage dicts) are automatically decoded back to Python objects.
+    """
+    if not path.exists():
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = toml.load(fh)
+    except Exception:
+        return []
+    events = data.get("event", [])
+    out = []
+    for ev in events:
+        decoded: Dict[str, Any] = {}
+        for k, v in ev.items():
+            if isinstance(v, str):
+                try:
+                    decoded[k] = json.loads(v)
+                except (ValueError, TypeError):
+                    decoded[k] = v
+            else:
+                decoded[k] = v
+        out.append(decoded)
+    return out
 
 
 def _redact(value: Any) -> Any:
@@ -124,28 +195,41 @@ class NullToolLogSink(ToolLogSink):
         return None
 
 
+class MultiToolLogSink(ToolLogSink):
+    """Fan-out sink: emits each event to all child sinks."""
+
+    def __init__(self, sinks: List[ToolLogSink]) -> None:
+        self._sinks = list(sinks)
+
+    def emit(self, event: Mapping[str, Any]) -> None:
+        for sink in self._sinks:
+            try:
+                sink.emit(event)
+            except Exception:
+                pass
+
+
 @dataclass
-class ToolLogJsonl(ToolLogSink):
-    """Append-only JSONL tool log sink.
+class ToolLogToml(ToolLogSink):
+    """Append-only TOML event log sink.
+
+    Each event is written as a [[event]] block in the TOML file.
+    Complex field values (dicts, lists) are JSON-encoded as strings.
 
     Parameters
     ----------
     path:
-        Output file path. If None, defaults to
-        `.codescribe/tool-logs/agent.jsonl` under the current working directory.
+        Output file path. Defaults to `.codescribe/logs/toolusage.toml`.
     redact_keys:
         Keys to redact in the event dict, at the top level.
-    flush:
-        Flush after each line.
     """
 
     path: Optional[str] = None
     redact_keys: Sequence[str] = ()
-    flush: bool = True
 
     def __post_init__(self) -> None:
         if not self.path:
-            self.path = os.path.join(".codescribe", "logs", "toolusage.jsonl")
+            self.path = os.path.join(".codescribe", "logs", "toolusage.toml")
         p = Path(self.path)
         p.parent.mkdir(parents=True, exist_ok=True)
 
@@ -155,15 +239,9 @@ class ToolLogJsonl(ToolLogSink):
             if k in self.redact_keys:
                 out[k] = _redact(v)
             else:
-                out[k] = _json_safe(v)
-
+                out[k] = v
         out.setdefault("ts", iso_utc_now())
-
-        line = json.dumps(out, ensure_ascii=False)
-        with open(self.path, "a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
-            if self.flush:
-                fh.flush()
+        append_toml_event(Path(self.path), out)
 
 
 class Timer:
