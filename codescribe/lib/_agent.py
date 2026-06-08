@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from codescribe import lib
-from codescribe.lib._diagnostics import NullDiagnosticsSink, Timer, new_run_id
 
 # ---------------------------------------------------------------------------
 # Text fallback tool protocol
@@ -763,7 +762,7 @@ class Agent:
         self.tool_output_max_chars = tool_output_max_chars
 
         # Logging sink (JSONL recommended). Must expose .emit(dict).
-        self.logging = logging if logging is not None else NullDiagnosticsSink()
+        self.logging = logging if logging is not None else lib.NullDiagnosticsSink()
 
     def enable_tool(self, name: str) -> None:
         if name not in self._tools:
@@ -787,7 +786,7 @@ class Agent:
         return [tool.to_openai_tool() for tool in self._enabled_tools()]
 
     def _execute(self, name: str, args: Dict[str, Any], *, run_id: Optional[str] = None, iteration: Optional[int] = None) -> str:
-        t = Timer()
+        t = lib.Timer()
         ok = True
         error: Optional[str] = None
         output: str
@@ -903,7 +902,7 @@ class Agent:
 
         empty_reply_nudged = False
 
-        run_id = new_run_id()
+        run_id = lib.new_run_id()
         try:
             self.logging.emit(
                 {
@@ -928,7 +927,7 @@ class Agent:
             except Exception:
                 pass
 
-            model_timer = Timer()
+            model_timer = lib.Timer()
             response = self.model.chat_with_tools(messages, self._tool_schemas())
             text = (response.get("text") or "").strip()
             tool_calls = response.get("tool_calls") or []
@@ -1068,7 +1067,7 @@ class Agent:
             messages.extend(chat_history)
         messages.append({"role": "user", "content": task})
 
-        run_id = new_run_id()
+        run_id = lib.new_run_id()
         try:
             self.logging.emit(
                 {
@@ -1100,7 +1099,7 @@ class Agent:
                 pass
             # Full context is sent on every call; accumulate before calling.
             total_input_tokens += current_context_tokens
-            model_timer = Timer()
+            model_timer = lib.Timer()
             response = self.model.chat(messages)
             total_output_tokens += _count_tokens(response)
 

@@ -422,9 +422,13 @@ def prompt_agent(
         # JsonlDiagnosticsSink will use its default location.
         logfile = lib.JsonlDiagnosticsSink(path=str(logging) if str(logging) else None)
 
+    # Default to bounded tools rooted at the current working directory,
+    # mirroring prompt_inspect and prompt_loop.
+    bounded_tools = tools if tools is not None else lib.make_bounded_tools(Path.cwd().resolve())
+
     coding_agent = lib.Agent(
         neural_model,
-        tools=tools if tools is not None else lib.DEFAULT_TOOLS,
+        tools=bounded_tools,
         max_iterations=agent_iterations,
         show_diagnostics=verbose,
         tool_output_max_chars=None,
@@ -508,7 +512,7 @@ def prompt_loop(
 
         logfile = None
         if logging is not None:
-            logfile = JsonlDiagnosticsSink(path=str(logging) if str(logging) else None)
+            logfile = lib.JsonlDiagnosticsSink(path=str(logging) if str(logging) else None)
 
         bounded_agent = lib.Agent(
             neural_model,
