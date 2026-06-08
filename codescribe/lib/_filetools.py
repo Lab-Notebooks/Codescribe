@@ -55,17 +55,21 @@ def create_archive_file(
     format_seed_prompt(file_path, chat_entries)
 
 
-def load_chat_template(filepath: Path) -> List[Dict[str, str]]:
-    """
-    Load and validate a chat prompt file.
+def load_chat_template(filepath: Path, *, return_meta: bool = False):
+    """Load and validate a chat prompt file.
 
-    Supports:
-      1. [[chat]]
-         role = "user" / "assistant"
-         content = '...'
+    Chat format:
+      - [[chat.user]] / [[chat.assistant]]
+        content = ''' ... '''
 
-      2. [[chat.user]] / [[chat.assistant]]
-         content = '...'
+    Legacy format (still supported):
+      - [[chat]]
+        role = "user" / "assistant"
+        content = ''' ... '''
+
+    Optional tool policy:
+      [tools]
+      bash = ["python3.8", "rg"]
 
     Validation rules:
       - Conversation must start with a 'user' message
@@ -73,6 +77,11 @@ def load_chat_template(filepath: Path) -> List[Dict[str, str]]:
       - Conversation must end with a 'user'
       - No two consecutive roles may be identical
       - Multi-line content **must** use triple single quotes (''' ... ''')
+
+    Returns:
+      - return_meta=False (default): chat_template
+      - return_meta=True: (chat_template, meta)
+        meta currently includes: {"tools": {"bash": [..]}}
     """
     path = Path(filepath)
     if path.suffix != ".toml":
@@ -82,6 +91,29 @@ def load_chat_template(filepath: Path) -> List[Dict[str, str]]:
 
     raw_text = path.read_text()
     data = toml.loads(raw_text)
+
+    # Optional tool policy (backwards-compatible: absence is fine)
+    meta: Dict[str, Any] = {}
+    tools_cfg = data.get("tools") if isinstance(data, dict) else None
+    if tools_cfg is not None:
+        if not isinstance(tools_cfg, dict):
+            raise TypeError(f"[tools] must be a table in {filepath}")
+        bash_tools = tools_cfg.get("bash", [])
+        if bash_tools is None:
+            bash_tools = []
+        if not isinstance(bash_tools, list) or not all(isinstance(x, str) for x in bash_tools):
+            raise TypeError(f"[tools].bash must be a list of strings in {filepath}")
+
+        # Name-only: no args, no paths.
+        name_re = re.compile(r"^[A-Za-z0-9_.+-]+$")
+        for x in bash_tools:
+            if not name_re.match(x):
+                raise ValueError(
+                    f"Invalid bash tool name {x!r} in {filepath}. "
+                    "Use a bare command name only (e.g. 'python3.8'), no args or paths."
+                )
+
+        meta = {"tools": {"bash": bash_tools}}
 
     # --- Enforce triple single quotes for multi-line content ---
     bad_quotes = re.findall(r'content\s*=\s*"""', raw_text)
@@ -153,7 +185,7 @@ def load_chat_template(filepath: Path) -> List[Dict[str, str]]:
                 f"Invalid role order at positions {i} and {i + 1}: "
                 f"two consecutive '{roles[i]}' entries found."
             )
-    return chat_template
+    return (chat_template, meta) if return_meta else chat_template
 
 
 def format_seed_prompt(filepath: Path, chat_entries: List[Dict[str, str]] = []) -> None:

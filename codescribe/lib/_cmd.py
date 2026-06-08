@@ -481,7 +481,20 @@ def prompt_loop(
     task_path = _ensure_within_workdir(Path(task_file), workdir_path)
 
     neural_model = _set_neural_model(model)
-    tools = lib.make_bounded_tools(workdir_path, protected_paths=[task_path])
+
+    # Task file is a TOML chat prompt. Also supports optional:
+    #
+    #   [tools]
+    #   bash = ["python3.8", "rg"]
+    #
+    chat_history, meta = lib.load_chat_template(task_path, return_meta=True)
+    bash_allow = set((meta.get("tools") or {}).get("bash") or [])
+
+    tools = lib.make_bounded_tools(
+        workdir_path,
+        protected_paths=[task_path],
+        bash_allow=bash_allow,
+    )
     paths = _loop_paths(workdir_path)
     os.makedirs(paths["dir"], exist_ok=True)
 
@@ -505,10 +518,8 @@ def prompt_loop(
         if verbose:
             print(f"\n▶  loop {loop_idx}")
 
-        try:
-            task_content = task_path.read_text(errors="replace")
-        except Exception as exc:
-            task_content = f"(could not read task file: {exc})"
+        # Reload chat_history each loop in case the prompt file changed externally.
+        chat_history, meta = lib.load_chat_template(task_path, return_meta=True)
 
         logfile = None
         if logging is not None:
@@ -523,16 +534,12 @@ def prompt_loop(
         )
 
         final_answer = bounded_agent.run(
-            textwrap.dedent(f"""
+            textwrap.dedent(
+                f"""
                 Working directory: {workdir_path}
+                Task file: {task_rel} (TOML chat prompt; do not edit)
 
-                Below is the content of the task file ({task_rel}):
-
-                <task_file>
-                {task_content}
-                </task_file>
-
-                Pick the single most important pending task from the task file above.
+                Pick the single most important pending task implied by the prompt and repository state.
 
                 IMPORTANT:
                 - Do exactly one task, then stop.
@@ -540,8 +547,10 @@ def prompt_loop(
                 - Do NOT modify {task_rel} — it is read-only input.
                 - Write a concise human-readable session report to {report_rel}.
                 - Finish with a <final_answer> briefly describing what you did.
-            """).strip(),
+                """
+            ).strip(),
             system=system,
+            chat_history=chat_history,
         )
 
         summary = (final_answer or "").replace("\n", " ").strip()[:120]

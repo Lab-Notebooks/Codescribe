@@ -512,10 +512,15 @@ def make_bounded_tools(
     root: Path,
     protected_paths: Optional[List[Path]] = None,
     allow_write: bool = True,
+    bash_allow: Optional[set] = None,
 ) -> List[AgentTool]:
+    allowed = set(BashTool._DEFAULT_ALLOWED)
+    if bash_allow:
+        allowed |= set(bash_allow)
+
     tools: List[AgentTool] = [
         ReadTool(root=root),
-        BashTool(cwd=root, bounded=True),
+        BashTool(cwd=root, bounded=True, allowed_commands=allowed),
     ]
     if allow_write:
         _protected = {p.resolve() for p in (protected_paths or [])}
