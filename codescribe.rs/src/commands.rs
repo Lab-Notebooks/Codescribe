@@ -10,23 +10,21 @@ pub fn translate(
     fortran_files: Vec<String>,
     seed_prompt: String,
     model: Option<String>,
-    save_prompts: bool,
 ) {
     println!(
-        "Translating Fortran files: {:?} with seed prompt: {}, model: {:?}, save prompts: {}",
-        fortran_files, seed_prompt, model, save_prompts
+        "Translating Fortran files: {:?} with seed prompt: {}, model: {:?}",
+        fortran_files, seed_prompt, model
     );
 }
 
 pub fn generate(
     seed_prompt: String,
     model: Option<String>,
-    save_prompts: bool,
     reference_existing: Vec<String>,
 ) {
     println!(
-        "Generating code with seed prompt: {}, model: {:?}, save prompts: {}, reference files: {:?}",
-        seed_prompt, model, save_prompts, reference_existing
+        "Generating code with seed prompt: {}, model: {:?}, reference files: {:?}",
+        seed_prompt, model, reference_existing
     );
 }
 
@@ -46,11 +44,10 @@ pub fn inspect(
     fortran_files: Vec<String>,
     query_prompt: String,
     model: Option<String>,
-    save_prompts: bool,
 ) {
     println!(
-        "Inspecting Fortran files: {:?} with query prompt: {}, model: {:?}, save prompts: {}",
-        fortran_files, query_prompt, model, save_prompts
+        "Inspecting Fortran files: {:?} with query prompt: {}, model: {:?}",
+        fortran_files, query_prompt, model
     );
 }
 

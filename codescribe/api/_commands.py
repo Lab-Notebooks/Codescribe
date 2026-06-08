@@ -31,20 +31,18 @@ def translate(
     filelist: List[Path],
     seed_prompt: Path,
     model: Union[Path, str],
-    save_prompts: bool = False,
 ) -> None:
     """
     API command for creating draft files
     """
     mapping = lib.create_src_mapping(filelist)
-    lib.prompt_translate(mapping, seed_prompt, model=model, save_prompts=save_prompts)
+    lib.prompt_translate(mapping, seed_prompt, model=model)
 
 
 def inspect(
     filelist: List[Path],
     query_prompt: str,
     model: Union[Path, str],
-    save_prompts: bool = False,
     verbose: bool = False,
 ) -> None:
     """
@@ -56,7 +54,6 @@ def inspect(
         query_prompt,
         file_index,
         model=model,
-        save_prompts=save_prompts,
         verbose=verbose,
     )
 
@@ -64,7 +61,6 @@ def inspect(
 def generate(
     seed_query_prompt: Union[Path, str],
     model: Union[Path, str],
-    save_prompts: bool = False,
     reference_existing: List[Path] = [],
 ) -> None:
     """
@@ -73,7 +69,6 @@ def generate(
     lib.prompt_generate(
         seed_query_prompt,
         model=model,
-        save_prompts=save_prompts,
         reference_existing=reference_existing,
     )
 
@@ -111,7 +106,6 @@ def format(seed_prompt_list: List[Path]) -> None:
 def agent(
     task: str,
     model: Union[Path, str],
-    system: str = "",
     agent_iterations: int = 20,
     verbose: bool = False,
     logging: Union[Path, str, None] = None,
@@ -122,7 +116,6 @@ def agent(
     return lib.prompt_agent(
         task,
         model=model,
-        system=system,
         agent_iterations=agent_iterations,
         verbose=verbose,
         logging=logging,

@@ -20,12 +20,10 @@ enum Commands {
         fortran_files: Vec<String>,
         seed_prompt: String,
         model: Option<String>,
-        save_prompts: bool,
     },
     Generate {
         seed_prompt: String,
         model: Option<String>,
-        save_prompts: bool,
         reference_existing: Vec<String>,
     },
     Update {
@@ -38,7 +36,6 @@ enum Commands {
         fortran_files: Vec<String>,
         query_prompt: String,
         model: Option<String>,
-        save_prompts: bool,
     },
     Format { seed_prompt_list: Vec<String> },
 }
@@ -53,14 +50,12 @@ fn main() {
             fortran_files,
             seed_prompt,
             model,
-            save_prompts,
-        } => translate(fortran_files, seed_prompt, model, save_prompts),
+        } => translate(fortran_files, seed_prompt, model),
         Commands::Generate {
             seed_prompt,
             model,
-            save_prompts,
             reference_existing,
-        } => generate(seed_prompt, model, save_prompts, reference_existing),
+        } => generate(seed_prompt, model, reference_existing),
         Commands::Update {
             filelist,
             seed_prompt,
@@ -71,8 +66,7 @@ fn main() {
             fortran_files,
             query_prompt,
             model,
-            save_prompts,
-        } => inspect(fortran_files, query_prompt, model, save_prompts),
+        } => inspect(fortran_files, query_prompt, model),
         Commands::Format { seed_prompt_list } => format(seed_prompt_list),
     }
 }

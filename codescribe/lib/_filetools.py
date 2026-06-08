@@ -3,8 +3,6 @@ import os
 import toml
 import yaml
 
-import datetime
-import hashlib
 
 from pathlib import Path
 from textwrap import wrap
@@ -12,47 +10,7 @@ from typing import List, Dict, Set, Any
 
 from codescribe import lib
 
-
-def create_archive_file(
-    chat_entries: List[Dict[str, str]], neural_model: object
-) -> None:
-    """
-    Create a new file under a dated folder structure: YYYY/MM/DD/timestamp_sha.toml
-
-    Example output:
-        2025/11/06/013215_a3f1b9c7.toml
-
-    """
-    base_dir = os.getenv("CODESCRIBE_ARCHIVE")
-    if not base_dir:
-        return
-
-    now = datetime.datetime.now()
-    timestamp = now.strftime("%H%M%S")
-    date_path = now.strftime("%Y/%m/%d")
-    sha = hashlib.sha1(str(now.timestamp()).encode()).hexdigest()[:8]
-
-    folder = Path(base_dir) / date_path
-    folder.mkdir(parents=True, exist_ok=True)
-
-    filename = f"{timestamp}_{sha}.toml"
-    file_path = folder / filename
-    file_path.touch()
-
-    lines = []
-    for entry in chat_entries:
-        role = entry["role"]
-        content = entry["content"].strip()
-        lines.append(f"[[chat.{role}]]")
-        lines.append("content = '''")
-        lines.append(content)
-        lines.append("'''\n")
-
-    metadata = [f"# {entry}" for entry in str(neural_model.__repr__()).split("\n")]
-    metadata.append("\n")
-
-    file_path.write_text("\n".join(metadata + lines))
-    format_seed_prompt(file_path, chat_entries)
+from ._logging import write_archive_toml
 
 
 def load_chat_template(filepath: Path, *, return_meta: bool = False):
@@ -101,7 +59,9 @@ def load_chat_template(filepath: Path, *, return_meta: bool = False):
         bash_tools = tools_cfg.get("bash", [])
         if bash_tools is None:
             bash_tools = []
-        if not isinstance(bash_tools, list) or not all(isinstance(x, str) for x in bash_tools):
+        if not isinstance(bash_tools, list) or not all(
+            isinstance(x, str) for x in bash_tools
+        ):
             raise TypeError(f"[tools].bash must be a list of strings in {filepath}")
 
         # Name-only: no args, no paths.

@@ -7,44 +7,18 @@ from alive_progress import alive_bar
 
 from codescribe import lib
 
-def _set_neural_model(model: Union[Path, str]) -> lib.Model:
-    """Instantiate and return the appropriate LLM based on the model string."""
-    if os.path.exists(model):
-        return lib.TFModel(model)
-
-    if model.lower().startswith("openai-"):
-        return lib.OpenAIModel(model.lower().strip("openai")[1:])
-
-    if model.lower().startswith("argo-"):
-        return lib.ArgoModel(model.lower().strip("argo")[1:])
-
-    if model.lower().startswith("anthropic-"):
-        return lib.AnthropicModel(model[len("anthropic-"):])
-
-    if model.lower().startswith("oaic-"):
-        return lib.OpenAICompModel(model[len("oaic-"):])
-
-    raise ValueError(
-        f"Unknown model '{model}'. Use a recognized prefix: "
-        "openai-, argo-, anthropic-, oaic-, or a local path."
-    )
-
 
 def prompt_translate(
     mapping: List[str],
     seed_prompt: Path,
     model: Union[Path, str] = None,
-    save_prompts: bool = False,
 ) -> None:
     """Perform translation using prompts and the supplied model."""
     neural_model = None
 
     if model:
         print("Starting neural conversion process")
-        neural_model = _set_neural_model(model)
-
-    if save_prompts:
-        print("Saving custom prompts per file")
+        neural_model = lib.set_neural_model(model)
 
     chat_template = lib.load_chat_template(seed_prompt)
 
@@ -57,7 +31,7 @@ def prompt_translate(
             bar.text(fsource)
             bar()
 
-            if not os.path.isfile(csource) or save_prompts:
+            if not os.path.isfile(csource):
                 cached_prompt = chat_template[-1]["content"]
 
                 with open(fsource, "r") as sfile:
@@ -92,11 +66,6 @@ def prompt_translate(
                                 "\n\n" + "<draft>\n" + "".join(draft_code) + "</draft>"
                             )
 
-                if save_prompts:
-                    with open(promptfile, "w") as pdest:
-                        json.dump(chat_template, pdest, indent=4)
-                    print(f"Generated prompt file for LLM consumption {promptfile}")
-
                 if neural_model:
                     result = neural_model.chat(chat_template)
 
@@ -127,10 +96,10 @@ def prompt_translate(
                         if fsource:
                             fdest.write(fsource.group(1))
 
-                lib.create_archive_file(
-                    chat_template + [{"role": "assistant", "content": result}],
-                    neural_model,
-                )
+                #lib.write_archive_toml(
+                #    chat_template + [{"role": "assistant", "content": result}],
+                #    neural_model,
+                #)
 
                 chat_template[-1]["content"] = cached_prompt
 
@@ -143,7 +112,6 @@ def prompt_inspect(
     query_prompt: str,
     file_index: Dict[str, str] = {},
     model: Union[Path, str] = None,
-    save_prompts: bool = False,
     verbose: bool = False,
 ) -> None:
     """Perform inspection on a list of files using the agent in bounded read-only mode."""
@@ -151,14 +119,18 @@ def prompt_inspect(
         raise ValueError("prompt_inspect requires a model when running in agent mode")
 
     print("Performing agent-based inspection")
-    neural_model = _set_neural_model(model)
+    neural_model = lib.set_neural_model(model)
 
     resolved_files = [Path(f).resolve() for f in filelist]
     if not resolved_files:
         raise ValueError("prompt_inspect requires at least one file")
 
-    common_root = Path(os.path.commonpath([str(path.parent) for path in resolved_files])).resolve()
-    rel_files = [str(path.relative_to(common_root)) for path in resolved_files]
+    # For common_root: directories contribute themselves; files contribute their parent dir.
+    roots = [p if p.is_dir() else p.parent for p in resolved_files]
+    common_root = Path(os.path.commonpath([str(p) for p in roots])).resolve()
+
+    # Keep user-requested files/dirs "as-is" in the context list.
+    rel_files = [str(p.relative_to(common_root)) for p in resolved_files]
 
     filtered_file_index = {}
     for fsource in resolved_files:
@@ -185,28 +157,11 @@ def prompt_inspect(
 
     task += "\nQuery:\n"
     task += query_prompt + "\n\n"
-    task += (
-        "Use read and bounded bash as needed, then finish with <final_answer> containing the answer."
-    )
-
-    if save_prompts:
-        print("Saving prompts to scribe.json")
-        with open("scribe.json", "w") as pdest:
-            json.dump(
-                {
-                    "mode": "agent_inspect",
-                    "workdir": str(common_root),
-                    "system": system,
-                    "task": task,
-                    "files": rel_files,
-                },
-                pdest,
-                indent=4,
-            )
+    task += "Use read and bounded bash as needed, then finish with <final_answer> containing the answer."
 
     coding_agent = lib.Agent(
         neural_model,
-        tools=lib.make_bounded_tools(common_root, allow_write=False),
+        tools=lib.make_readonly_tools(common_root),
         max_iterations=20,
         show_diagnostics=verbose,
     )
@@ -217,7 +172,6 @@ def prompt_inspect(
 def prompt_generate(
     seed_prompt: Union[Path, str],
     model: Union[Path, str] = None,
-    save_prompts: bool = False,
     reference_existing: List[Path] = [],
 ) -> None:
     """Perform code generation based on the provided seed prompt."""
@@ -225,10 +179,7 @@ def prompt_generate(
 
     if model:
         print("Performing neural generation")
-        neural_model = _set_neural_model(model)
-
-    if save_prompts:
-        print("Saving prompts to scribe.json")
+        neural_model = lib.set_neural_model(model)
 
     system_template = [{"role": "system", "content": ""}]
     system_template[-1]["content"] += (
@@ -275,10 +226,6 @@ def prompt_generate(
                     "\n" + f"<{filename}>\n" + "".join(source_code) + f"</{filename}>\n"
                 )
 
-    if save_prompts:
-        with open("scribe.json", "w") as pdest:
-            json.dump(chat_template, pdest, indent=4)
-
     if neural_model:
         result = neural_model.chat(chat_template)
 
@@ -291,9 +238,9 @@ def prompt_generate(
                 f.write(content.strip() + "\n")
             print(f"Wrote {filename}")
 
-        lib.create_archive_file(
-            chat_template + [{"role": "assistant", "content": result}], neural_model
-        )
+        #lib.write_archive_toml(
+        #    chat_template + [{"role": "assistant", "content": result}], neural_model
+        #)
 
 
 def prompt_update(
@@ -307,7 +254,7 @@ def prompt_update(
     neural_model = None
 
     print("Performing neural update")
-    neural_model = _set_neural_model(model)
+    neural_model = lib.set_neural_model(model)
 
     system_template = [{"role": "system", "content": ""}]
     system_template[-1]["content"] += (
@@ -390,16 +337,14 @@ def prompt_update(
                 f.write(content.strip() + "\n")
             print(f"Wrote {filename}")
 
-        lib.create_archive_file(
-            chat_template + [{"role": "assistant", "content": result}], neural_model
-        )
+        #lib.write_archive_toml(
+        #    chat_template + [{"role": "assistant", "content": result}], neural_model
+        #)
 
 
 def prompt_agent(
     task: str,
     model: Union[Path, str],
-    system: str = "",
-    tools: Optional[List] = None,
     agent_iterations: int = 20,
     verbose: bool = False,
     logging: Optional[Union[Path, str]] = None,
@@ -414,153 +359,23 @@ def prompt_agent(
     Set verbose=True to print agent diagnostics (per-iteration reasoning and tool calls)
     to stdout as the agent works.
     """
-    neural_model = _set_neural_model(model)
+    neural_model = lib.set_neural_model(model)
 
     logfile = None
     if logging is not None:
         # If logging is passed as an empty string (e.g. CLI --log with no PATH),
-        # JsonlDiagnosticsSink will use its default location.
-        logfile = lib.JsonlDiagnosticsSink(path=str(logging) if str(logging) else None)
+        # ToolLogJsonl will use its default location.
+        logfile = lib.ToolLogJsonl(path=str(logging) if str(logging) else None)
 
-    # Default to bounded tools rooted at the current working directory,
-    # mirroring prompt_inspect and prompt_loop.
-    bounded_tools = tools if tools is not None else lib.make_bounded_tools(Path.cwd().resolve())
+    # Always use bounded tools rooted at the current working directory.
+    tools = lib.make_tools(Path.cwd().resolve())
 
     coding_agent = lib.Agent(
         neural_model,
-        tools=bounded_tools,
+        tools=tools,
         max_iterations=agent_iterations,
         show_diagnostics=verbose,
         tool_output_max_chars=None,
         logging=logfile,
     )
-    return coding_agent.run(task, system=system)
-
-
-def _ensure_within_workdir(path: Path, workdir: Path) -> Path:
-    path = path.resolve()
-    workdir = workdir.resolve()
-    try:
-        path.relative_to(workdir)
-    except ValueError:
-        raise ValueError(f"Path {path} is outside working directory {workdir}")
-    return path
-
-
-def _loop_paths(workdir: Path) -> Dict[str, Path]:
-    loop_dir = workdir / ".codescribe" / "loop"
-    return {
-        "dir": loop_dir,
-        "status": loop_dir / "status.json",
-        "report": loop_dir / "report.md",
-    }
-
-
-def _write_loop_status(path: Path, payload: Dict[str, Any]) -> None:
-    os.makedirs(path.parent, exist_ok=True)
-    with open(path, "w") as fh:
-        json.dump(payload, fh, indent=2)
-
-
-def prompt_loop(
-    task_file: Union[Path, str],
-    model: Union[Path, str],
-    agent_loops: int = 5,
-    agent_iterations: int = 12,
-    verbose: bool = False,
-    logging: Optional[Union[Path, str]] = None,
-    workdir: Optional[Union[Path, str]] = None,
-) -> str:
-    """
-    Run a bounded loop: one fresh agent session per loop receives the task file
-    contents directly, picks the single most important pending task, executes it,
-    and exits. Each agent session is bounded to agent_iterations tool-call iterations.
-    No state is carried between loops; everything is inferred from files.
-    """
-    workdir_path = Path(workdir).resolve() if workdir else Path.cwd().resolve()
-    task_path = _ensure_within_workdir(Path(task_file), workdir_path)
-
-    neural_model = _set_neural_model(model)
-
-    # Task file is a TOML chat prompt. Also supports optional:
-    #
-    #   [tools]
-    #   bash = ["python3.8", "rg"]
-    #
-    chat_history, meta = lib.load_chat_template(task_path, return_meta=True)
-    bash_allow = set((meta.get("tools") or {}).get("bash") or [])
-
-    tools = lib.make_bounded_tools(
-        workdir_path,
-        protected_paths=[task_path],
-        bash_allow=bash_allow,
-    )
-    paths = _loop_paths(workdir_path)
-    os.makedirs(paths["dir"], exist_ok=True)
-
-    task_rel = task_path.relative_to(workdir_path)
-    report_rel = paths["report"].relative_to(workdir_path)
-
-    system = (
-        "You are an autonomous coding agent. Treat every session as fresh. "
-        "Infer all project state from files and command output within the working directory. "
-        "IMPORTANT: Only access files and paths within the working directory. "
-        "In bash commands, only use relative paths or paths under the working directory — "
-        "never run find, ls, cat, or any command targeting system directories or paths outside it."
-    )
-
-    for loop_idx in range(1, agent_loops + 1):
-        _write_loop_status(
-            paths["status"],
-            {"loop": loop_idx, "state": "running", "summary": ""},
-        )
-
-        if verbose:
-            print(f"\n▶  loop {loop_idx}")
-
-        # Reload chat_history each loop in case the prompt file changed externally.
-        chat_history, meta = lib.load_chat_template(task_path, return_meta=True)
-
-        logfile = None
-        if logging is not None:
-            logfile = lib.JsonlDiagnosticsSink(path=str(logging) if str(logging) else None)
-
-        bounded_agent = lib.Agent(
-            neural_model,
-            tools=tools,
-            max_iterations=agent_iterations,
-            show_diagnostics=verbose,
-            logging=logfile,
-        )
-
-        final_answer = bounded_agent.run(
-            textwrap.dedent(
-                f"""
-                Working directory: {workdir_path}
-                Task file: {task_rel} (TOML chat prompt; do not edit)
-
-                Pick the single most important pending task implied by the prompt and repository state.
-
-                IMPORTANT:
-                - Do exactly one task, then stop.
-                - Only access files within the working directory. Use relative paths in bash.
-                - Do NOT modify {task_rel} — it is read-only input.
-                - Write a concise human-readable session report to {report_rel}.
-                - Finish with a <final_answer> briefly describing what you did.
-                """
-            ).strip(),
-            system=system,
-            chat_history=chat_history,
-        )
-
-        summary = (final_answer or "").replace("\n", " ").strip()[:120]
-        _write_loop_status(
-            paths["status"],
-            {"loop": loop_idx, "state": "complete", "summary": summary},
-        )
-
-        if verbose:
-            detail = f"  {summary[:65]}" if summary else ""
-            print(f"  ↩  session complete{detail}\n")
-
-    return f"completed {agent_loops} loop(s)  —  report: {paths['report']}"
+    return coding_agent.run(task)

@@ -55,23 +55,14 @@ def draft(fortran_files: List[Path]) -> None:
 @click.option(
     "--model",
     "-m",
-    cls=lib.MutuallyExclusiveOption,
+    required=False,
+    default=os.getenv("CODESCRIBE_MODEL"),
     help="Gen AI model name or path",
-    mutually_exclusive=["save_prompts"],
-)
-@click.option(
-    "--save-prompts",
-    "-s",
-    is_flag=True,
-    cls=lib.MutuallyExclusiveOption,
-    help="Save file specific prompts to json file",
-    mutually_exclusive=["model"],
 )
 def translate(
     fortran_files: List[Path],
     seed_prompt: Path,
     model: Union[str, Path],
-    save_prompts: bool,
 ) -> None:
     """
     \b
@@ -84,18 +75,15 @@ def translate(
     interface
     \b
     """
-    if (not model) and (not save_prompts):
-        model = os.getenv("CODESCRIBE_MODEL")
-        if not model:
-            raise click.UsageError(
-                "Please provide either the '--model/-m' or '--save-prompts/-p' option"
-            )
+    if not model:
+        raise click.UsageError(
+            "Please provide the '--model/-m' option (or set CODESCRIBE_MODEL)"
+        )
 
     api.translate(
         [Path(file) for file in fortran_files],
         Path(seed_prompt),
         model,
-        save_prompts,
     )
 
 
@@ -104,17 +92,9 @@ def translate(
 @click.option(
     "--model",
     "-m",
-    cls=lib.MutuallyExclusiveOption,
+    required=False,
+    default=os.getenv("CODESCRIBE_MODEL"),
     help="Gen AI model name or path",
-    mutually_exclusive=["save_prompts"],
-)
-@click.option(
-    "--save-prompts",
-    "-s",
-    is_flag=True,
-    cls=lib.MutuallyExclusiveOption,
-    help="Save file specific prompts to json file",
-    mutually_exclusive=["model"],
 )
 @click.option(
     "--reference-existing",
@@ -126,7 +106,6 @@ def translate(
 def generate(
     seed_query_prompt: Union[Path, str],
     model: Union[Path, str],
-    save_prompts: bool,
     reference_existing: List[Path],
 ) -> None:
     """
@@ -139,17 +118,14 @@ def generate(
     based on specifications given in the prompt
     \b
     """
-    if (not model) and (not save_prompts):
-        model = os.getenv("CODESCRIBE_MODEL")
-        if not model:
-            raise click.UsageError(
-                "Please provide either the '--model/-m' or '--save-prompts/-p' option"
-            )
+    if not model:
+        raise click.UsageError(
+            "Please provide the '--model/-m' option (or set CODESCRIBE_MODEL)"
+        )
 
     api.generate(
         seed_query_prompt,
         model,
-        save_prompts,
         [Path(file) for file in reference_existing],
     )
 
@@ -217,17 +193,9 @@ def update(
 @click.option(
     "--model",
     "-m",
-    cls=lib.MutuallyExclusiveOption,
+    required=False,
+    default=os.getenv("CODESCRIBE_MODEL"),
     help="Gen AI model name or path",
-    mutually_exclusive=["save_prompts"],
-)
-@click.option(
-    "--save-prompts",
-    "-s",
-    is_flag=True,
-    cls=lib.MutuallyExclusiveOption,
-    help="Save file specific prompts to json file",
-    mutually_exclusive=["model"],
 )
 @click.option(
     "--verbose",
@@ -240,7 +208,6 @@ def inspect(
     fortran_files: List[Path],
     query_prompt: str,
     model: Union[str, Path],
-    save_prompts: bool,
     verbose: bool,
 ) -> None:
     """
@@ -254,18 +221,15 @@ def inspect(
     on the the combination of files
     \b
     """
-    if (not model) and (not save_prompts):
-        model = os.getenv("CODESCRIBE_MODEL")
-        if not model:
-            raise click.UsageError(
-                "Please provide either the '--model/-m' or '--save-prompts/-p' option"
-            )
+    if not model:
+        raise click.UsageError(
+            "Please provide the '--model/-m' option (or set CODESCRIBE_MODEL)"
+        )
 
     api.inspect(
         [Path(file) for file in fortran_files],
         query_prompt,
         model,
-        save_prompts,
         verbose=verbose,
     )
 
@@ -297,12 +261,6 @@ def format(seed_prompt_list: List[Path]) -> None:
     required=True,
     default=os.getenv("CODESCRIBE_MODEL"),
     help="Gen AI model name or path",
-)
-@click.option(
-    "--system",
-    "-s",
-    default="",
-    help="Optional system prompt prepended to the agent instructions",
 )
 @click.option(
     "--agent-iterations",
@@ -338,7 +296,6 @@ def format(seed_prompt_list: List[Path]) -> None:
 def agent(
     task: str,
     model: Union[str, Path],
-    system: str,
     agent_iterations: int,
     verbose: bool,
     log_enabled: bool,
@@ -365,7 +322,6 @@ def agent(
     result = api.agent(
         task,
         model,
-        system=system,
         agent_iterations=agent_iterations,
         verbose=verbose,
         logging=effective_log,
