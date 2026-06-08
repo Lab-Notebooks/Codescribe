@@ -1,9 +1,9 @@
-# Documentation
+# Docs
 
-This directory contains human-readable documentation for important parts of Codescribe.
+Short reference docs for Codescribe.
 
-## Available documents
-
-- [`models.md`](./models.md) — model backend selection (`openai-*`, `anthropic-*`, `oaic-*`, `argo-*`, and local checkpoints), required environment variables, and tool-calling support.
-- [`agent.md`](./agent.md) — a first-principles walkthrough of the standalone coding agent implemented in `codescribe/lib/_agent.py`, including its tool model, control loop, bounded execution mode, and design tradeoffs.
-- [`TODO.md`](./TODO.md) — curated list of open work items (kept in docs to reduce drift and keep the repository root clean).
+- [`models.md`](./models.md): model selection and required environment variables.
+- [`agent.md`](./agent.md): how the coding agent works (tools, bounded mode, fallback protocol).
+- [`tools.md`](./tools.md): tool implementations (`read/glob/bash/edit/write`).
+- [`loop.md`](./loop.md): loop mode internals (`code-scribe loop`).
+- [`TODO.md`](./TODO.md): curated open work items.

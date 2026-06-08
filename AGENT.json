@@ -1,20 +1,22 @@
 {
   "schema_version": "1.0",
   "name": "CodeScribe",
-  "title": "CodeScribe — AGENT card",
+  "title": "CodeScribe — agent card",
   "what_this_repo_is": {
-    "summary": "CodeScribe is an AI-assisted framework for scientific software development.",
+    "summary": "AI-assisted framework for scientific software development: incremental Fortran→C++ translation plus code inspection/generation/update and tool-using agent workflows.",
     "capabilities": [
-      "Incremental Fortran → C++ translation (with interface layers)",
-      "Code inspection / generation / update",
-      "Tool-using “coding agent” workflows (`read`, `bash`, `edit`, `write`)"
+      "Incremental Fortran → C++ translation (with interface-layer support)",
+      "Code inspection, generation, and update",
+      "Tool-using coding agent workflows (read/bash/edit/write)",
+      "Bounded, fresh-session agent loops over a task file"
     ],
-    "usage_note": "Use this repo when you need automated, repo-aware code changes with an auditable tool loop."
+    "entry_points": [
+      "CLI: code-scribe (see --help)",
+      "Agent runtime: codescribe/lib/_agent.py",
+      "Model backends: codescribe/lib/_llm.py"
+    ]
   },
   "install": {
-    "notes": [
-      "Recommended: use a virtual environment."
-    ],
     "commands": [
       "python3 -m venv env",
       "source env/bin/activate",
@@ -24,91 +26,61 @@
     ]
   },
   "model_setup": {
-    "topic": "OpenAI-compatible endpoints",
-    "supports": "OpenAI-compatible backends via the `oaic-` model prefix.",
+    "recommended": "OpenAI-compatible endpoints (oaic-*)",
     "environment_variables": [
       {
         "name": "OPENAI_COMP_BASEURL",
         "required": true,
-        "description": "Base URL of the OpenAI-compatible API (must include /v1).",
+        "description": "Base URL of an OpenAI-compatible API (must include /v1).",
         "example": "http://localhost:11434/v1"
       },
       {
         "name": "OPENAI_COMP_PROVIDER",
         "required": true,
-        "description": "Provider label (used internally for auth routing).",
+        "description": "Provider label used for routing/auth policy (e.g. ollama, alcf-inference).",
         "example": "ollama"
       },
       {
         "name": "OPENAI_COMP_APIKEY",
         "required": true,
-        "description": "Required by the current implementation (even if the endpoint itself needs no auth).",
+        "description": "API key used by the client. Some local endpoints accept any placeholder.",
         "example": "placeholder"
       }
     ],
-    "example_command": "code-scribe inspect README.rst -m oaic-llama3.1 -q \"Summarize this project and list key entry points.\"",
+    "example_command": "code-scribe inspect README.rst -m oaic-llama3.1 -q \"Summarize this repo and list key entry points.\"",
     "docs": [
       {
         "path": "docs/models.md",
-        "description": "Other backends/env vars"
+        "description": "Backends and env vars"
       }
     ]
   },
-  "discover_capabilities": {
-    "description": "CodeScribe workflows are exposed as CLI subcommands.",
-    "commands": [
-      "code-scribe --help",
-      "code-scribe agent --help",
-      "code-scribe loop --help",
-      "code-scribe inspect --help",
-      "code-scribe generate --help",
-      "code-scribe update --help",
-      "code-scribe translate --help",
-      "code-scribe index --help"
-    ]
-  },
   "safety": {
-    "bounded_vs_unbounded": [
+    "modes": [
       {
-        "mode": "loop",
+        "command": "loop",
         "bounded": true,
-        "recommended": true,
-        "description": "Runs repeated fresh sessions over a task file and uses bounded tools rooted at the working tree. This reduces risk from arbitrary shell commands and path escapes.",
+        "description": "Runs repeated fresh sessions over a task file using bounded tools rooted at the working tree.",
         "artifacts": [
           ".codescribe/loop/status.json",
           ".codescribe/loop/report.md"
         ]
       },
       {
-        "mode": "agent",
+        "command": "agent",
         "bounded": false,
-        "recommended": false,
-        "description": "Runs a single tool-using session. Useful for interactive, one-off tasks and may be less restricted than loop mode."
+        "description": "Single agent session with unbounded tools (use with care)."
       }
     ],
     "notes": [
-      "Bounded mode is a practical constraint layer, not an OS sandbox."
+      "Bounded mode is a practical constraint layer, not an OS sandbox.",
+      "Bounded bash uses an allowlist and rejects shell metacharacters; some commands will fail by design."
     ],
     "docs": [
       {
         "path": "docs/agent.md",
-        "description": "Bounded mode details"
+        "description": "Agent architecture and bounded-mode policy"
       }
     ]
-  },
-  "minimal_workflows": [
-    {
-      "name": "Single agent session",
-      "command": "code-scribe agent \"Find failing tests and propose a minimal fix.\" -m oaic-llama3.1"
-    },
-    {
-      "name": "Bounded loop over a task file",
-      "command": "code-scribe loop task.md -m oaic-llama3.1"
-    }
-  ],
-  "considerations": [
-    "Agent runs are capped by an iteration limit; tasks may stop early if not completed.",
-    "Bounded `bash` is allowlisted and rejects shell metacharacters; some commands will fail by design.",
-    "Prefer `edit` for precise changes to existing files; use `write` for new/fully replaced files."
-  ]
+  }
 }
