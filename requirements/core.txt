@@ -1,7 +1,0 @@
-click
-requests
-toml
-pyyaml
-alive-progress==3.1.4
-openai
-anthropic

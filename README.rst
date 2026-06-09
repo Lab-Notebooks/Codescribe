@@ -97,8 +97,8 @@ modify existing files seamlessly.
  Installation
 **************
 
-At present, we recommend installing Codescribe in a virtual
-environment:
+Codescribe uses ``pyproject.toml`` to declare its build system and
+dependencies. We recommend installing in a virtual environment:
 
 .. code:: bash
 
@@ -106,11 +106,18 @@ environment:
    source env/bin/activate
    pip install --upgrade pip
 
-And install Codescribe using ``pip`` in editable mode:
+Install Codescribe and its core dependencies using ``pip`` in editable
+mode:
 
 .. code:: bash
 
    pip install -e .
+
+To also install the optional Hugging Face / Transformers backend:
+
+.. code:: bash
+
+   pip install -e ".[transformers]"
 
 Editable mode enables testing of features/updates directly from the
 source code and is an effective method for debugging.
@@ -377,12 +384,6 @@ with a message similar to:
 
       export OPENAI_API_KEY="your_openai_api_key_here"
 
-   And install the OpenAI library:
-
-   .. code:: bash
-
-      pip install openai
-
 #. **Anthropic Models**: Codescribe supports Anthropic's Claude models
    (such as ``claude-opus-4-8``, ``claude-sonnet-4-6``,
    ``claude-haiku-4-5``, etc.) via the Anthropic API. The
@@ -397,12 +398,6 @@ with a message similar to:
    .. code:: bash
 
       export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
-
-   And install the Anthropic library:
-
-   .. code:: bash
-
-      pip install anthropic
 
    Optionally set ``ANTHROPIC_BASE_URL`` to redirect requests to a
    compatible proxy or private endpoint.
@@ -460,11 +455,12 @@ with a message similar to:
    Face / Transformers checkpoint by passing its path as the model
    argument. Codescribe supports this through the ``TFModel`` backend.
 
-   To use a Hugging Face model, first install the necessary libraries:
+   To use a Hugging Face model, first install the optional
+   ``transformers`` extra:
 
    .. code:: bash
 
-      pip install transformers torch
+      pip install -e ".[transformers]"
 
    Then specify the path to the pre-trained model using the ``-m`` flag.
    For example, to use a GPT-2 model:
