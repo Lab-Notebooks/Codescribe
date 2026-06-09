@@ -555,6 +555,41 @@ These diagnostics are expected and useful: they show exactly how the
 bounded tool layer constrains an agent session. See ``docs/loop.md`` for
 the full bounded-mode policy and how to configure ``--workdir``.
 
+****************
+ Code of Conduct
+****************
+
+We are committed to fostering a welcoming and respectful community.
+All participants in this project are expected to:
+
+-  Be respectful and considerate of others.
+-  Use inclusive language and avoid discriminatory or harassing behavior.
+-  Accept constructive feedback graciously.
+-  Focus on what is best for the community and the project.
+
+Unacceptable behavior should be reported to the project maintainers.
+Maintainers have the right to remove, edit, or reject any contributions
+that do not align with these standards.
+
+***************
+ Contributing
+***************
+
+Contributions are welcome and appreciated. There are two main ways to
+contribute:
+
+#. **File an issue**: Report a bug, request a feature, or ask a
+   question by opening an issue on the project's GitHub page.
+
+#. **Create a pull request**: Pick up an item from
+   `docs/TODO.md <docs/TODO.md>`__, implement it, and open a pull
+   request. Please keep pull requests focused on a single task and
+   include a brief description of what was changed and why.
+
+Before submitting a pull request, make sure your changes pass any
+existing tests and follow the code style conventions used in the
+project (``black`` for Python formatting).
+
 **********
  Citation
 **********
