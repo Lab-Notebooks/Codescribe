@@ -623,7 +623,7 @@ project (``black`` for Python formatting).
    :target: https://github.com/psf/black
 
 .. |fig1| image:: ./media/workflow.png
-   :width: 600px
+   :width: 650px
 
 .. |fig2| image:: ./media/agent.png
-   :width: 600px
+   :width: 850px
