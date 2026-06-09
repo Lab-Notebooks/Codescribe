@@ -590,5 +590,5 @@ the full bounded-mode policy and how to configure ``--workdir``.
 .. |fig1| image:: ./media/workflow.png
    :width: 600px
 
-.. |fig2| image:: ./media/engine.png
+.. |fig2| image:: ./media/agent.png
    :width: 600px
