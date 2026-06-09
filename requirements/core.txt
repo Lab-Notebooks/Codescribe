@@ -2,7 +2,6 @@ click
 requests
 toml
 pyyaml
-pypandoc
 alive-progress==3.1.4
 openai
 anthropic

@@ -1,2 +1,2 @@
-IGNORE - *.dev/
+IGNORE - *.dev/, *.dev
 CARD - AGENT.json
