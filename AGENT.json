@@ -28,7 +28,19 @@
     ]
   },
   "model_setup": {
-    "recommended": "OpenAI-compatible endpoints (oaic-*)",
+    "recommended": "Anthropic (anthropic-*) for agent and loop commands — native tool calling, streaming, and adaptive reasoning are all supported. Use oaic-* for local or OpenAI-compatible endpoints.",
+    "anthropic_quickstart": {
+      "required_env": ["ANTHROPIC_API_KEY"],
+      "optional_env": ["CODESCRIBE_AGENT_REASONING", "ANTHROPIC_BASE_URL", "CODESCRIBE_MAX_TOKENS"],
+      "model_prefix": "anthropic-",
+      "example_models": ["anthropic-claude-sonnet-4-6", "anthropic-claude-opus-4-8"],
+      "reasoning_note": "Pass --reasoning to agent or loop to enable adaptive thinking. Reasoning is configured at the LLM level (AnthropicModel) and silently ignored by all other backends. The agent relays returned reasoning_blocks verbatim into the next turn, as required by the Anthropic API. CODESCRIBE_AGENT_REASONING=1 env var is also supported as a fallback for scripting/CI. Recommended for claude-sonnet-4-6 and claude-opus-* on complex agentic tasks. Do not enable for Haiku or older models.",
+      "example_commands": [
+        "ANTHROPIC_API_KEY=sk-ant-... code-scribe agent \"Fix failing tests\" -m anthropic-claude-sonnet-4-6",
+        "ANTHROPIC_API_KEY=sk-ant-... code-scribe agent \"Fix failing tests\" -m anthropic-claude-sonnet-4-6 --reasoning",
+        "ANTHROPIC_API_KEY=sk-ant-... code-scribe loop task.toml -m anthropic-claude-sonnet-4-6 --reasoning"
+      ]
+    },
     "environment_variables": [
       {
         "name": "CODESCRIBE_MODEL",
@@ -69,7 +81,7 @@
       {
         "name": "ANTHROPIC_API_KEY",
         "required": false,
-        "description": "API key for Anthropic models (anthropic-* prefix).",
+        "description": "API key for Anthropic models (anthropic-* prefix). Required when using the recommended Anthropic backend for agent and loop commands.",
         "example": "sk-ant-..."
       },
       {
@@ -77,6 +89,12 @@
         "required": false,
         "description": "Optional base URL override for Anthropic models (e.g. a proxy endpoint).",
         "example": "https://my-proxy.internal/anthropic"
+      },
+      {
+        "name": "CODESCRIBE_AGENT_REASONING",
+        "required": false,
+        "description": "Set to '1' to enable adaptive thinking on supported Anthropic models (claude-opus-*, claude-sonnet-4-6). Has no effect on other backends.",
+        "example": "1"
       },
       {
         "name": "ARGO_USER",
@@ -104,14 +122,15 @@
       {
         "command": "loop",
         "bounded": true,
-        "description": "Repeated execution→review cycles. Cross-loop state is carried in-memory; each cycle starts a fresh agent whose context is injected by the harness. On-disk artifacts under .codescribe/loop/ are for inspection and crash-resume only.",
+        "description": "Repeated execution→review cycles. Cross-loop state is carried in-memory; each cycle starts a fresh agent whose context is injected by the harness. The loop exits early if the review agent reports no pending items and no blocker. On-disk artifacts under .codescribe/loop/ are for inspection and crash-resume only.",
         "options": {
           "--workdir DIR": "Root directory the agent is bounded to (default: cwd)",
           "--agent-loops/-nloop N": "Number of execution→review cycles (default: 5)",
           "--agent-iterations/-niter N": "Tool-call budget per cycle (default: 12)",
           "--verbose/-v": "Stream per-iteration tool calls and token usage to stdout",
           "--log": "Write TOML diagnostic events to the default path: .codescribe/logs/toolusage.toml",
-          "--log-path PATH": "Write TOML diagnostic events to PATH (implies --log)"
+          "--log-path PATH": "Write TOML diagnostic events to PATH (implies --log)",
+          "--reasoning": "Enable adaptive thinking (Anthropic models only; ignored for other backends)"
         },
         "artifacts": [
           ".codescribe/loop/run.toml",
@@ -129,7 +148,8 @@
           "--agent-iterations/-niter N": "Maximum tool-call iterations (default: 20)",
           "--verbose/-v": "Stream per-iteration tool calls and token usage to stdout",
           "--log": "Write TOML diagnostic events to the default path: .codescribe/logs/toolusage.toml",
-          "--log-path PATH": "Write TOML diagnostic events to PATH (implies --log)"
+          "--log-path PATH": "Write TOML diagnostic events to PATH (implies --log)",
+          "--reasoning": "Enable adaptive thinking (Anthropic models only; ignored for other backends)"
         }
       }
     ],
@@ -137,7 +157,11 @@
       "Bounded mode is a practical constraint layer, not an OS sandbox.",
       "Bounded bash uses an allowlist and rejects shell metacharacters; some commands will fail by design.",
       "The loop task file can extend the bash allowlist via a [tools] bash = [...] TOML section.",
-      "TOML diagnostic logs include tool_start (with model_reasoning) and tool_end (with output_preview) events for post-run inspection."
+      "TOML diagnostic logs include tool_start (with model_reasoning) and tool_end (with output_preview) events for post-run inspection.",
+      "Agent hard limits per run: 120 total tool calls, 10 per iteration, 2 repeat-call attempts (read gets 3x). After 3 consecutive all-error iterations the agent is nudged to emit a BLOCKED answer.",
+      "Tool outputs are capped at 8000 chars in message history; truncated output includes a paging hint (read(path, offset=N)).",
+      "review.toml (review-phase event log) is always written unconditionally. execution.toml is cleared and rewritten at the start of each execution phase. Both differ from --log, which routes execution events to an additional user-specified path.",
+      "The review agent's bash tool is restricted to: ls, stat, pwd, find, grep, head, tail, which, env, rg. No write, edit, or arbitrary shell commands."
     ],
     "docs": [
       {

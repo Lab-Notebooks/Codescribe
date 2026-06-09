@@ -23,31 +23,38 @@ class _OpenAIBaseModel:
     # number of tokens the model may generate for the reply (i.e., output tokens).
     # Default bumped to allow more verbose reasoning / planning.
     max_tokens = int(os.getenv("CODESCRIBE_MAX_TOKENS", "24576"))
+    reasoning_effort: Optional[str] = "high"
 
     @property
     def supports_native_tools(self) -> bool:
         return True
 
     def chat(self, chat_template: List[Dict[str, str]]) -> str:
-        response = self.pipeline.chat.completions.create(
+        kwargs: Dict[str, Any] = dict(
             model=self.model,
             messages=chat_template,
             max_tokens=self.max_tokens,
             n=self.outputs,
         )
+        if self.reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        response = self.pipeline.chat.completions.create(**kwargs)
         self.last_usage = _normalize_openai_usage(getattr(response, "usage", None))
         return response.choices[0].message.content
 
     def chat_with_tools(
         self, chat_template: List[Dict[str, Any]], tools: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        response = self.pipeline.chat.completions.create(
+        kwargs: Dict[str, Any] = dict(
             model=self.model,
             messages=chat_template,
             tools=tools,
             max_tokens=self.max_tokens,
             n=self.outputs,
         )
+        if self.reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        response = self.pipeline.chat.completions.create(**kwargs)
         self.last_usage = _normalize_openai_usage(getattr(response, "usage", None))
         return _normalize_openai_tool_response(
             response.choices[0].message, self.last_usage
@@ -257,7 +264,7 @@ class ArgoModel:
 
 
 class AnthropicModel:
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, reasoning: bool = False) -> None:
         anthropic = importlib.import_module("anthropic")
 
         self.apikey = os.getenv("ANTHROPIC_API_KEY")
@@ -271,14 +278,10 @@ class AnthropicModel:
 
         self.client = anthropic.Anthropic(**client_kwargs)
         self.model = model
-        # Anthropic "max_tokens" is the maximum output tokens to generate.
         self.max_tokens = int(os.getenv("CODESCRIBE_MAX_TOKENS", "24576"))
         self.last_usage = None
-        # Set CODESCRIBE_AGENT_REASONING=1 to enable adaptive thinking on supported models
-        # (claude-opus-*/claude-sonnet-4-6). Do not set for Haiku or older models.
-        self.reasoning_enabled = os.getenv("CODESCRIBE_AGENT_REASONING", "").lower() in (
-            "1", "true", "yes"
-        )
+        env_reasoning = os.getenv("CODESCRIBE_AGENT_REASONING", "").lower() in ("1", "true", "yes")
+        self.reasoning_enabled = reasoning or env_reasoning
 
     @property
     def supports_native_tools(self) -> bool:
@@ -827,7 +830,7 @@ ALLOWED_MODEL_TYPES = (OpenAIModel, OpenAICompModel, AnthropicModel, ArgoModel, 
 Model = Union[OpenAIModel, OpenAICompModel, AnthropicModel, ArgoModel, TFModel]
 
 
-def set_neural_model(model: Union[Path, str]) -> Model:
+def set_neural_model(model: Union[Path, str], reasoning: bool = False) -> Model:
     """Instantiate and return the appropriate LLM based on the model string."""
     model_str = str(model)
     if os.path.exists(model_str):
@@ -840,10 +843,10 @@ def set_neural_model(model: Union[Path, str]) -> Model:
         return ArgoModel(model[len("argo-"):])
 
     if model.lower().startswith("anthropic-"):
-        return AnthropicModel(model[len("anthropic-") :])
+        return AnthropicModel(model[len("anthropic-"):], reasoning=reasoning)
 
     if model.lower().startswith("oaic-"):
-        return OpenAICompModel(model[len("oaic-") :])
+        return OpenAICompModel(model[len("oaic-"):])
 
     raise ValueError(
         f"Unknown model '{model}'. Use a recognized prefix: "

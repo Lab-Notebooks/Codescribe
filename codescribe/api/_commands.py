@@ -109,6 +109,7 @@ def agent(
     agent_iterations: int = 20,
     verbose: bool = False,
     logging: Union[Path, str, None] = None,
+    reasoning: bool = False,
 ) -> str:
     """
     API command for running the agentic loop on a task
@@ -119,6 +120,7 @@ def agent(
         agent_iterations=agent_iterations,
         verbose=verbose,
         logging=logging,
+        reasoning=reasoning,
     )
 
 
@@ -130,6 +132,7 @@ def loop(
     verbose: bool = False,
     logging: Union[Path, str, None] = None,
     workdir: Union[Path, None] = None,
+    reasoning: bool = False,
 ) -> str:
     """
     API command for running the bounded loop
@@ -142,4 +145,5 @@ def loop(
         verbose=verbose,
         logging=logging,
         workdir=workdir,
+        reasoning=reasoning,
     )

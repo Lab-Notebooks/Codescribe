@@ -293,6 +293,12 @@ def format(seed_prompt_list: List[Path]) -> None:
     type=click.Path(dir_okay=True, file_okay=True, writable=True),
     help="Write agent diagnostic events (TOML) to PATH (implies --log).",
 )
+@click.option(
+    "--reasoning",
+    "reasoning",
+    is_flag=True,
+    help="Enable adaptive thinking (Anthropic models only; ignored for other backends).",
+)
 def agent(
     task: str,
     model: Union[str, Path],
@@ -300,6 +306,7 @@ def agent(
     verbose: bool,
     log_enabled: bool,
     log_path: Union[str, None],
+    reasoning: bool,
 ) -> None:
     """
     \b
@@ -325,6 +332,7 @@ def agent(
         agent_iterations=agent_iterations,
         verbose=verbose,
         logging=effective_log,
+        reasoning=reasoning,
     )
     click.echo(result)
 
@@ -382,6 +390,12 @@ def agent(
     type=click.Path(dir_okay=True, file_okay=True, writable=True),
     help="Write agent diagnostic events (TOML) to PATH (implies --log).",
 )
+@click.option(
+    "--reasoning",
+    "reasoning",
+    is_flag=True,
+    help="Enable adaptive thinking (Anthropic models only; ignored for other backends).",
+)
 def loop(
     task_file: Path,
     model: Union[str, Path],
@@ -391,6 +405,7 @@ def loop(
     verbose: bool,
     log_enabled: bool,
     log_path: Union[str, None],
+    reasoning: bool,
 ) -> None:
     """
     \b
@@ -418,5 +433,6 @@ def loop(
         verbose=verbose,
         logging=effective_log,
         workdir=Path(workdir) if workdir else None,
+        reasoning=reasoning,
     )
     click.echo(result)
