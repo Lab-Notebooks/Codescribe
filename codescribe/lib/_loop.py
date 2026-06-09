@@ -576,8 +576,7 @@ def prompt_loop(
                     for p in raw_pending
                     if p
                 ]
-                if reviewed_items:
-                    pending_items = [x for x in reviewed_items if x]
+                pending_items = [x for x in reviewed_items if x]
 
             # Early exit: if the review reports no pending items and no blocker,
             # the task is done — no need to consume the remaining loop budget.

@@ -776,10 +776,10 @@ def set_neural_model(model: Union[Path, str]) -> Model:
         return TFModel(Path(model_str))
 
     if model.lower().startswith("openai-"):
-        return OpenAIModel(model.lower().strip("openai")[1:])
+        return OpenAIModel(model[len("openai-"):])
 
     if model.lower().startswith("argo-"):
-        return ArgoModel(model.lower().strip("argo")[1:])
+        return ArgoModel(model[len("argo-"):])
 
     if model.lower().startswith("anthropic-"):
         return AnthropicModel(model[len("anthropic-") :])
