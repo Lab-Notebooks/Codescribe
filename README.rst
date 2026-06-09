@@ -586,13 +586,13 @@ project (``black`` for Python formatting).
 
    @software{akash_dhruv_2024_13879406,
    author       = {Akash Dhruv},
-   title        = {akashdhruv/Codescribe: 2026.02},
+   title        = {akashdhruv/CodeScribe: 2026.02},
    month        = feb,
    year         = 2026,
    publisher    = {Zenodo},
    version      = {2026.02},
    doi          = {10.5281/zenodo.18738066},
-   url          = {https://github.com/akashdhruv/Codescribe}
+   url          = {https://github.com/Lab-Notebooks/CodeScribe}
    }
 
 .. code:: latex
