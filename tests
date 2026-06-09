@@ -3,7 +3,7 @@
 # CodeScribe Quicktest
 
 export CODESCRIBE_TUTORIAL_PATH="tutorial"
-export CODESCRIBE_MODEL="oaic-claudesonnet45"
+export CODESCRIBE_MODEL="oaic-claudeopus46"
 
 cd $CODESCRIBE_TUTORIAL_PATH/src
 code-scribe index .
@@ -16,7 +16,7 @@ rm Initialize.cpp Initialize.hpp Initialize_fi.F90 Initialize.scribe
 
 cd ..
 code-scribe generate prompts/code_generation.toml
-cd generated-src && make && ./main && cd ..
+cd generated-src && make && ./hello && cd ..
 
 code-scribe generate \
 "Write complicated.toml file to generate a more complicated application in generated-src" \
