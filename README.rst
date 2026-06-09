@@ -475,18 +475,6 @@ with a message similar to:
    You can download a model from the Hugging Face model hub by visiting
    https://huggingface.co/models.
 
-#. **Saving Custom Prompts**: Instead of selecting a model and running
-   a command immediately, you can save the generated prompts for later
-   use. Use the ``--save-prompts`` flag to store prompts in JSON format,
-   which is useful when copying them into an external chat tool.
-
-   .. code:: bash
-
-      ▶ code-scribe translate <filelist> -p <seed_prompt.toml> --save-prompts
-
-   For ``inspect``, the saved prompt is written to ``scribe.json``. For
-   ``translate``, prompt files are generated per source file.
-
 Please see the source file ``codescribe/lib/_llm.py`` for full backend
 implementation details.
 
