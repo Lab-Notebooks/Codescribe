@@ -2,6 +2,12 @@
 
 Codescribe selects an LLM backend based on the prefix of the `-m/--model` argument.
 
+## Common environment variable
+
+- `CODESCRIBE_MAX_TOKENS` — maximum output tokens the model may generate per reply.
+  Applies to all backends. Default: `24576`.
+  Example: `export CODESCRIBE_MAX_TOKENS=8192`
+
 ## Recommended: OpenAI-compatible endpoints (`oaic-*`)
 
 Use this when you have **any OpenAI-compatible `/v1` API** (self-hosted or managed). This is the most portable backend and is generally the recommended default.
@@ -34,8 +40,11 @@ Tool calling:
 - Model prefix: `anthropic-...`
 - Env vars:
   - `ANTHROPIC_API_KEY`
-  - `ANTHROPIC_BASE_URL` (optional; override API base URL)
+  - `ANTHROPIC_BASE_URL` (optional; override API base URL, e.g. for a proxy)
 - Tool calling: **native tool calling supported**
+- Note: both `chat()` and `chat_with_tools()` prefer the streaming API
+  (`client.messages.stream`) and fall back to non-streaming if the SDK or
+  provider does not support it.
 
 ## ARGO (`argo-*`)
 

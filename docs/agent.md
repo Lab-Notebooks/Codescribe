@@ -77,6 +77,21 @@ Default bounded allowlist: `ls`, `pwd`, `find`, `grep`, `head`, `tail`, `wc`,
 `git`, `test`, `echo`, `sed`. Loop task files can extend this via a
 `[tools] bash = [...]` TOML section.
 
+## Tool-call budget and repetition policy
+
+Three internal limits govern tool execution within a single `Agent.run()` call:
+
+| Limit | Default | Meaning |
+|---|---|---|
+| `_max_tool_calls_total` | 120 | Hard cap across the entire run; the agent stops and returns an error string if reached. |
+| `_max_tool_calls_per_iteration` | 10 | At most this many tool calls are executed per LLM turn; excess calls are skipped and the model is notified. |
+| `_max_repeated_calls` | 2 | Identical `(tool, args)` pairs are blocked after this many uses (6 for `read`). Counts reset after a successful `edit` or `write` (workspace changed). |
+
+Tool outputs larger than 8 000 characters are truncated in the message history to
+prevent unbounded context growth. Errors and small outputs are always passed in
+full. The model is told how many characters were omitted and how to page through
+the rest using `read(path, offset=N)`.
+
 ## Workspace context injection
 
 Each iteration the agent injects a compact `WORKSPACE CONTEXT` system
@@ -98,11 +113,19 @@ without growing the conversation unboundedly.
 - Add a logging sink: implement a class with an `.emit(dict)` method and pass
   it as `logging=` to `Agent()`. Use `MultiToolLogSink([sink1, sink2])` to fan
   out to multiple sinks simultaneously (e.g. two TOML log files, or a TOML file
-  + a custom telemetry sink).
-- Each `tool_end` event includes `output_preview` (first 500 chars of actual
-  output) and `model_reasoning` (first 500 chars of the model's preceding text).
-  Downstream consumers such as the loop review agent can use these to cross-check
-  model-reported results against real tool outputs.
+  + a custom telemetry sink). The built-in `ToolLogToml` sink writes
+  append-only TOML event files; its default path is
+  `.codescribe/logs/toolusage.toml`.
+- Enable/disable individual tools at runtime via `agent.enable_tool(name)` and
+  `agent.disable_tool(name)`. The underlying `AgentTool.enabled` flag controls
+  whether the tool is included in the schema sent to the model and whether
+  execution is permitted.
+- Each `tool_start` event includes `model_reasoning` (first 500 chars of the
+  model's preceding text that triggered the tool call).
+- Each `tool_end` event includes `output_preview` (first 500 chars of actual tool
+  output), `ok` (bool), `error` (string or null), and `duration_ms`.
+  Downstream consumers such as the loop review agent can use `output_preview` to
+  cross-check model-reported results against real tool outputs.
 - Tool outputs are passed to the model as-is — no summarization, no truncation,
   no `RAW:` wrapper. The `_summarize_tool_output()` helper is used only to
   populate the compact `WORKSPACE CONTEXT` grounding block, not the model messages.

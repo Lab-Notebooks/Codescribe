@@ -281,8 +281,8 @@ def format(seed_prompt_list: List[Path]) -> None:
     "log_enabled",
     is_flag=True,
     help=(
-        "Write agent diagnostics events (JSONL) to the default path: "
-        ".codescribe/diagnostics/agent.jsonl."
+        "Write agent diagnostic events (TOML) to the default path: "
+        ".codescribe/logs/toolusage.toml."
     ),
 )
 @click.option(
@@ -291,7 +291,7 @@ def format(seed_prompt_list: List[Path]) -> None:
     required=False,
     default=None,
     type=click.Path(dir_okay=True, file_okay=True, writable=True),
-    help="Write agent diagnostics events (JSONL) to PATH (implies --log).",
+    help="Write agent diagnostic events (TOML) to PATH (implies --log).",
 )
 def agent(
     task: str,
@@ -316,7 +316,7 @@ def agent(
     if log_path is not None:
         effective_log = log_path
     elif log_enabled:
-        # Empty string means "use default log path" in JsonlDiagnosticsSink.
+        # Empty string means "use default log path" in ToolLogToml.
         effective_log = ""
 
     result = api.agent(
@@ -370,8 +370,8 @@ def agent(
     "log_enabled",
     is_flag=True,
     help=(
-        "Write agent diagnostics events (JSONL) to the default path: "
-        ".codescribe/diagnostics/agent.jsonl."
+        "Write agent diagnostic events (TOML) to the default path: "
+        ".codescribe/logs/toolusage.toml."
     ),
 )
 @click.option(
@@ -380,7 +380,7 @@ def agent(
     required=False,
     default=None,
     type=click.Path(dir_okay=True, file_okay=True, writable=True),
-    help="Write agent diagnostics events (JSONL) to PATH (implies --log).",
+    help="Write agent diagnostic events (TOML) to PATH (implies --log).",
 )
 def loop(
     task_file: Path,
@@ -407,7 +407,7 @@ def loop(
     if log_path is not None:
         effective_log = log_path
     elif log_enabled:
-        # Empty string means "use default log path" in JsonlDiagnosticsSink.
+        # Empty string means "use default log path" in ToolLogToml.
         effective_log = ""
 
     result = api.loop(

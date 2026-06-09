@@ -20,7 +20,7 @@ Available tools (high level):
 - write: create/overwrite a file
 
 Rules:
-- Before each set of tool calls, write one or two sentences stating what you are about to do and why. This reasoning is recorded in the loop transcript and helps reviewers understand your intent.
+- Be concise and practical.
 - Use tools whenever you need to inspect files, run commands, or change the filesystem.
 - Do NOT fabricate tool outputs. If you need info, call a tool.
 - You may batch multiple independent reads or globs in the same turn.
@@ -32,8 +32,8 @@ Rules:
 """
 
 # Internal defaults (kept out of the public Agent interface)
-_DEFAULT_MAX_TOOL_CALLS_TOTAL = 80
-_DEFAULT_MAX_TOOL_CALLS_PER_ITERATION = 8
+_DEFAULT_MAX_TOOL_CALLS_TOTAL = 120
+_DEFAULT_MAX_TOOL_CALLS_PER_ITERATION = 10
 _DEFAULT_MAX_REPEATED_CALLS = 2
 
 
@@ -362,11 +362,11 @@ class Agent:
         rec = {
             "tool": name,
             "args_preview": _fmt_args(name, args),
-            "summary": summary[:1200],
+            "summary": summary[:2000],
             "ok": not _is_error_output(output or ""),
         }
         self._state["recent"].append(rec)
-        self._state["recent"] = self._state["recent"][-8:]
+        self._state["recent"] = self._state["recent"][-12:]
 
         if not rec["ok"]:
             self._state["recent_errors"].append(f"{name}: {summary[:400]}")
@@ -391,7 +391,7 @@ class Agent:
 
         if recent:
             lines.append("- recent_tool_results:")
-            for r in recent[-6:]:
+            for r in recent[-10:]:
                 s = (r.get("summary") or "").replace("\n", " | ")
                 s = (s[:240] + "…") if len(s) > 240 else s
                 lines.append(f"  - {r['tool']}({r['args_preview']}): {s}")
@@ -600,9 +600,19 @@ class Agent:
                     ):
                         self._state["call_counts"] = {}
 
-                    # Pass the full tool output to the model as-is — no summarization,
-                    # no truncation, no RAW: wrapper.
-                    outputs.append(output)
+                    # Cap very large outputs in the message history to prevent
+                    # the context window from growing unboundedly across iterations.
+                    # Errors and small outputs are always passed in full.
+                    _MAX_HIST_CHARS = 8000
+                    if not _is_error_output(output) and len(output) > _MAX_HIST_CHARS:
+                        msg_output = (
+                            output[:_MAX_HIST_CHARS]
+                            + f"\n…[output truncated: {len(output) - _MAX_HIST_CHARS} chars omitted."
+                            " Use read(path, offset=N) to page through the rest.]"
+                        )
+                    else:
+                        msg_output = output
+                    outputs.append(msg_output)
                     executed_calls.append(call)
 
                     if self.show_diagnostics:

@@ -95,9 +95,10 @@ Neither list is written to disk between loops.
   start of each execution phase so it contains only that loop's events).
 - When `--log`/`--log-path` is also provided, events are fanned out to both sinks
   via `MultiToolLogSink`.
-- Each `tool_end` event includes `output_preview` (first 500 chars of actual output)
-  and `model_reasoning` (first 500 chars of the model's preceding text before the
-  tool call).
+- Each `tool_start` event includes `model_reasoning` (first 500 chars of the
+  model's preceding text that triggered the tool call).
+- Each `tool_end` event includes `output_preview` (first 500 chars of actual output),
+  `ok` (bool), `error` (string or null), and `duration_ms`.
 
 ## Anti-hallucination design
 
@@ -116,6 +117,14 @@ Several layers work together to reduce fabricated results:
 5. **Review agent gets only `read`, `glob`, `write`**: no `bash` or `edit`, keeping the
    review phase narrow. Its `chat_history` includes the execution agent's final answer so
    it can cross-check claims.
+
+## Early exit
+
+After each review phase, the harness checks whether `review_output.toml` contains
+no `[[pending]]` entries **and** an empty `blocker` string. If both conditions hold
+after a given loop, `prompt_loop()` stops immediately without consuming the remaining
+loop budget and prints a confirmation message (if `verbose=True`). This prevents
+unnecessary execution cycles when the task is already complete.
 
 ## Safety model
 

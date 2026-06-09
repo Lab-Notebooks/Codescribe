@@ -91,12 +91,12 @@ Recommended default: **OpenAI-compatible endpoints** using the ``oaic-`` prefix.
 ***********************
 
 - ``CODESCRIBE_MODEL``: default model name used when ``-m`` is omitted.
+- ``CODESCRIBE_MAX_TOKENS``: maximum output tokens per model reply (default: 24576).
 - ``OPENAI_API_KEY`` for ``openai-*``
 - ``ANTHROPIC_API_KEY`` for ``anthropic-*``
 - ``ANTHROPIC_BASE_URL`` (optional) for ``anthropic-*``
 - ``ARGO_USER`` and ``ARGO_API_ENDPOINT`` for ``argo-*``
 - ``OPENAI_COMP_BASEURL``, ``OPENAI_COMP_PROVIDER``, ``OPENAI_COMP_APIKEY`` for ``oaic-*``
-- ``CODESCRIBE_ARCHIVE`` to save prompt/response transcripts
 
 **********
  Citation

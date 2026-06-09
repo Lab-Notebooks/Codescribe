@@ -8,7 +8,10 @@ from pathlib import Path
 
 class _OpenAIBaseModel:
     outputs = 1
-    max_tokens = 16384
+    # Provider "max_tokens" (OpenAI Responses/ChatCompletions style) is the maximum
+    # number of tokens the model may generate for the reply (i.e., output tokens).
+    # Default bumped to allow more verbose reasoning / planning.
+    max_tokens = int(os.getenv("CODESCRIBE_MAX_TOKENS", "24576"))
 
     @property
     def supports_native_tools(self) -> bool:
@@ -250,7 +253,8 @@ class AnthropicModel:
 
         self.client = anthropic.Anthropic(**client_kwargs)
         self.model = model
-        self.max_tokens = 16384
+        # Anthropic "max_tokens" is the maximum output tokens to generate.
+        self.max_tokens = int(os.getenv("CODESCRIBE_MAX_TOKENS", "24576"))
         self.last_usage = None
 
     @property
@@ -274,13 +278,37 @@ class AnthropicModel:
         if system:
             kwargs["system"] = system
 
-        response = self.client.messages.create(**kwargs)
-        self.last_usage = _normalize_anthropic_usage(getattr(response, "usage", None))
+        # Newer anthropic-sdk-python versions require streaming for long requests
+        # (server-side enforcement for operations that may exceed ~10 minutes).
+        # We prefer streaming here and reconstruct the final text.
+        try:
+            stream = self.client.messages.stream(**kwargs)
+        except Exception:
+            # Fallback to non-streaming if the installed SDK/provider permits it.
+            response = self.client.messages.create(**kwargs)
+            self.last_usage = _normalize_anthropic_usage(getattr(response, "usage", None))
+            for block in response.content:
+                if block.type == "text":
+                    return block.text
+            return ""
 
-        for block in response.content:
-            if block.type == "text":
-                return block.text
-        return ""
+        text_parts: List[str] = []
+        final_message = None
+        with stream as s:
+            for event in s:
+                # Collect text deltas.
+                if getattr(event, "type", None) == "content_block_delta":
+                    delta = getattr(event, "delta", None)
+                    if getattr(delta, "type", None) == "text_delta":
+                        text_parts.append(getattr(delta, "text", "") or "")
+                # Keep a handle to the final message so we can extract usage.
+                if getattr(event, "type", None) == "message_stop":
+                    final_message = getattr(event, "message", None)
+
+        self.last_usage = _normalize_anthropic_usage(
+            getattr(final_message, "usage", None) if final_message is not None else None
+        )
+        return "".join(text_parts)
 
     def chat_with_tools(
         self, chat_template: List[Dict[str, Any]], tools: List[Dict[str, Any]]
@@ -302,10 +330,53 @@ class AnthropicModel:
         if system:
             kwargs["system"] = system
 
-        response = self.client.messages.create(**kwargs)
-        usage = _normalize_anthropic_usage(getattr(response, "usage", None))
+        # Prefer streaming for long requests; accumulate events and normalize into
+        # the same {text, tool_calls, usage} shape as non-streaming.
+        try:
+            stream = self.client.messages.stream(**kwargs)
+        except Exception:
+            response = self.client.messages.create(**kwargs)
+            usage = _normalize_anthropic_usage(getattr(response, "usage", None))
+            self.last_usage = usage
+            return _normalize_anthropic_tool_response(response, usage)
+
+        text_parts: List[str] = []
+        tool_calls: List[Dict[str, Any]] = []
+        final_message = None
+
+        with stream as s:
+            for event in s:
+                et = getattr(event, "type", None)
+
+                if et == "content_block_delta":
+                    delta = getattr(event, "delta", None)
+                    if getattr(delta, "type", None) == "text_delta":
+                        text_parts.append(getattr(delta, "text", "") or "")
+                    elif getattr(delta, "type", None) == "input_json_delta":
+                        # Tool use input JSON arrives as deltas; the SDK also emits a
+                        # full "tool_use" block in message_stop.final_message. We
+                        # ignore these deltas and rely on the final message parse.
+                        pass
+
+                if et == "message_stop":
+                    final_message = getattr(event, "message", None)
+
+        usage = _normalize_anthropic_usage(
+            getattr(final_message, "usage", None) if final_message is not None else None
+        )
         self.last_usage = usage
-        return _normalize_anthropic_tool_response(response, usage)
+
+        # Normalize tool calls from the final message content.
+        response = final_message
+        if response is None:
+            return {"text": "".join(text_parts), "tool_calls": [], "usage": usage}
+
+        normalized = _normalize_anthropic_tool_response(response, usage)
+        # If the normalizer didn't include text (because it focuses on tool calls),
+        # use the streamed text as a fallback.
+        if not normalized.get("text"):
+            normalized["text"] = "".join(text_parts)
+        return normalized
 
     def format_tool_result_messages(
         self, tool_calls: List[Dict[str, Any]], outputs: List[str]

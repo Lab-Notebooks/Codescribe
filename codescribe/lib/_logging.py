@@ -154,11 +154,15 @@ def read_toml_events(path: Path) -> List[Dict[str, Any]]:
     except Exception:
         return []
     events = data.get("event", [])
+    # Only these fields are JSON-encoded complex types (dict/list); everything
+    # else is a plain string (run_id, ts, tool names, etc.) and should not be
+    # parsed — trying json.loads on every string wastes CPU for no gain.
+    _JSON_FIELDS = frozenset({"args", "usage"})
     out = []
     for ev in events:
         decoded: Dict[str, Any] = {}
         for k, v in ev.items():
-            if isinstance(v, str):
+            if isinstance(v, str) and k in _JSON_FIELDS:
                 try:
                     decoded[k] = json.loads(v)
                 except (ValueError, TypeError):

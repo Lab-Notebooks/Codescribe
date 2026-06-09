@@ -37,22 +37,58 @@
         "example": "oaic-llama3.1"
       },
       {
+        "name": "CODESCRIBE_MAX_TOKENS",
+        "required": false,
+        "description": "Maximum output tokens the model may generate per reply. Applies to all backends. Default: 24576.",
+        "example": "8192"
+      },
+      {
         "name": "OPENAI_COMP_BASEURL",
         "required": true,
-        "description": "Base URL of an OpenAI-compatible API (must include /v1).",
+        "description": "Base URL of an OpenAI-compatible API (must include /v1). Used by oaic-* models.",
         "example": "http://localhost:11434/v1"
       },
       {
         "name": "OPENAI_COMP_PROVIDER",
         "required": true,
-        "description": "Provider label used for routing/auth policy (e.g. ollama, alcf-inference).",
+        "description": "Provider label used for routing/auth policy (e.g. ollama, alcf-inference). Used by oaic-* models.",
         "example": "ollama"
       },
       {
         "name": "OPENAI_COMP_APIKEY",
         "required": true,
-        "description": "API key used by the client. Some local endpoints accept any placeholder.",
+        "description": "API key for the oaic-* client. Some local endpoints accept any placeholder.",
         "example": "placeholder"
+      },
+      {
+        "name": "OPENAI_API_KEY",
+        "required": false,
+        "description": "API key for hosted OpenAI models (openai-* prefix).",
+        "example": "sk-..."
+      },
+      {
+        "name": "ANTHROPIC_API_KEY",
+        "required": false,
+        "description": "API key for Anthropic models (anthropic-* prefix).",
+        "example": "sk-ant-..."
+      },
+      {
+        "name": "ANTHROPIC_BASE_URL",
+        "required": false,
+        "description": "Optional base URL override for Anthropic models (e.g. a proxy endpoint).",
+        "example": "https://my-proxy.internal/anthropic"
+      },
+      {
+        "name": "ARGO_USER",
+        "required": false,
+        "description": "Username for the ARGO endpoint (argo-* prefix).",
+        "example": "jdoe"
+      },
+      {
+        "name": "ARGO_API_ENDPOINT",
+        "required": false,
+        "description": "Full URL of the ARGO inference API (argo-* prefix).",
+        "example": "https://argo.example.org/v1/chat"
       }
     ],
     "example_command": "code-scribe inspect README.rst -m oaic-llama3.1 -q \"Summarize this repo and list key entry points.\"",
@@ -72,7 +108,10 @@
         "options": {
           "--workdir DIR": "Root directory the agent is bounded to (default: cwd)",
           "--agent-loops/-nloop N": "Number of execution→review cycles (default: 5)",
-          "--agent-iterations/-niter N": "Tool-call budget per cycle (default: 12)"
+          "--agent-iterations/-niter N": "Tool-call budget per cycle (default: 12)",
+          "--verbose/-v": "Stream per-iteration tool calls and token usage to stdout",
+          "--log": "Write TOML diagnostic events to the default path: .codescribe/logs/toolusage.toml",
+          "--log-path PATH": "Write TOML diagnostic events to PATH (implies --log)"
         },
         "artifacts": [
           ".codescribe/loop/run.toml",
@@ -85,13 +124,20 @@
       {
         "command": "agent",
         "bounded": false,
-        "description": "Single agent session with unbounded tools (use with care). Supports --verbose/-v to stream tool calls to stdout and --log/--log-path to write TOML diagnostics."
+        "description": "Single agent session with unbounded tools (use with care).",
+        "options": {
+          "--agent-iterations/-niter N": "Maximum tool-call iterations (default: 20)",
+          "--verbose/-v": "Stream per-iteration tool calls and token usage to stdout",
+          "--log": "Write TOML diagnostic events to the default path: .codescribe/logs/toolusage.toml",
+          "--log-path PATH": "Write TOML diagnostic events to PATH (implies --log)"
+        }
       }
     ],
     "notes": [
       "Bounded mode is a practical constraint layer, not an OS sandbox.",
       "Bounded bash uses an allowlist and rejects shell metacharacters; some commands will fail by design.",
-      "The loop task file can extend the bash allowlist via a [tools] bash = [...] TOML section."
+      "The loop task file can extend the bash allowlist via a [tools] bash = [...] TOML section.",
+      "TOML diagnostic logs include tool_start (with model_reasoning) and tool_end (with output_preview) events for post-run inspection."
     ],
     "docs": [
       {
