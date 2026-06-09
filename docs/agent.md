@@ -103,6 +103,7 @@ without growing the conversation unboundedly.
 
 - `code-scribe agent`: single agent run (unbounded tools)
 - `code-scribe loop`: repeated fresh sessions (bounded tools; writes reports)
+- `--reason`: pass to either command to enable adaptive thinking on Anthropic backends (`anthropic-*`). Reasoning blocks returned by the model are relayed verbatim into the next turn, as required by the Anthropic API. Silently ignored by all other backends. `CODESCRIBE_AGENT_REASONING=1` is supported as a scripting/CI fallback.
 
 ## Key extension points
 

@@ -34,11 +34,11 @@
       "optional_env": ["CODESCRIBE_AGENT_REASONING", "ANTHROPIC_BASE_URL", "CODESCRIBE_MAX_TOKENS"],
       "model_prefix": "anthropic-",
       "example_models": ["anthropic-claude-sonnet-4-6", "anthropic-claude-opus-4-8"],
-      "reasoning_note": "Pass --reasoning to agent or loop to enable adaptive thinking. Reasoning is configured at the LLM level (AnthropicModel) and silently ignored by all other backends. The agent relays returned reasoning_blocks verbatim into the next turn, as required by the Anthropic API. CODESCRIBE_AGENT_REASONING=1 env var is also supported as a fallback for scripting/CI. Recommended for claude-sonnet-4-6 and claude-opus-* on complex agentic tasks. Do not enable for Haiku or older models.",
+      "reasoning_note": "Pass --reason to agent or loop to enable adaptive thinking. Reasoning is configured at the LLM level (AnthropicModel) and silently ignored by all other backends. The agent relays returned reasoning_blocks verbatim into the next turn, as required by the Anthropic API. CODESCRIBE_AGENT_REASONING=1 env var is also supported as a fallback for scripting/CI. Recommended for claude-sonnet-4-6 and claude-opus-* on complex agentic tasks. Do not enable for Haiku or older models.",
       "example_commands": [
         "ANTHROPIC_API_KEY=sk-ant-... code-scribe agent \"Fix failing tests\" -m anthropic-claude-sonnet-4-6",
-        "ANTHROPIC_API_KEY=sk-ant-... code-scribe agent \"Fix failing tests\" -m anthropic-claude-sonnet-4-6 --reasoning",
-        "ANTHROPIC_API_KEY=sk-ant-... code-scribe loop task.toml -m anthropic-claude-sonnet-4-6 --reasoning"
+        "ANTHROPIC_API_KEY=sk-ant-... code-scribe agent \"Fix failing tests\" -m anthropic-claude-sonnet-4-6 --reason",
+        "ANTHROPIC_API_KEY=sk-ant-... code-scribe loop task.toml -m anthropic-claude-sonnet-4-6 --reason"
       ]
     },
     "environment_variables": [
@@ -130,7 +130,7 @@
           "--verbose/-v": "Stream per-iteration tool calls and token usage to stdout",
           "--log": "Write TOML diagnostic events to the default path: .codescribe/logs/toolusage.toml",
           "--log-path PATH": "Write TOML diagnostic events to PATH (implies --log)",
-          "--reasoning": "Enable adaptive thinking (Anthropic models only; ignored for other backends)"
+          "--reason": "Enable adaptive thinking (Anthropic models only; ignored for other backends)"
         },
         "artifacts": [
           ".codescribe/loop/run.toml",
@@ -149,7 +149,7 @@
           "--verbose/-v": "Stream per-iteration tool calls and token usage to stdout",
           "--log": "Write TOML diagnostic events to the default path: .codescribe/logs/toolusage.toml",
           "--log-path PATH": "Write TOML diagnostic events to PATH (implies --log)",
-          "--reasoning": "Enable adaptive thinking (Anthropic models only; ignored for other backends)"
+          "--reason": "Enable adaptive thinking (Anthropic models only; ignored for other backends)"
         }
       }
     ],

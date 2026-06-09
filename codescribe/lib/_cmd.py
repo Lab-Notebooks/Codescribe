@@ -356,7 +356,7 @@ def prompt_agent(
     agent_iterations: int = 20,
     verbose: bool = False,
     logging: Optional[Union[Path, str]] = None,
-    reasoning: bool = False,
+    reason: bool = False,
 ) -> str:
     """Run the agentic loop on *task* using the supplied model string.
 
@@ -368,7 +368,7 @@ def prompt_agent(
     Set verbose=True to print agent diagnostics (per-iteration reasoning and tool calls)
     to stdout as the agent works.
     """
-    neural_model = lib.set_neural_model(model, reasoning=reasoning)
+    neural_model = lib.set_neural_model(model, reasoning=reason)
 
     logfile = None
     if logging is not None:

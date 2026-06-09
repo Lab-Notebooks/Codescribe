@@ -114,6 +114,31 @@ And install Codescribe using ``pip`` in editable mode:
 Editable mode enables testing of features/updates directly from the
 source code and is an effective method for debugging.
 
+***************
+ Quick Start
+***************
+
+Set your API key and run a one-shot agent task:
+
+.. code:: bash
+
+   export ANTHROPIC_API_KEY="sk-ant-..."
+   code-scribe agent "Write a hello world Python script to hello.py" \
+       -m anthropic-claude-sonnet-4-6 --verbose
+
+The agent uses the ``write`` tool to create ``hello.py`` and emits a
+``<final_answer>`` when done. With ``--verbose`` you see each tool call
+and token usage as it runs.
+
+To run a multi-session bounded loop over a task file:
+
+.. code:: bash
+
+   code-scribe loop task.toml -m anthropic-claude-sonnet-4-6 --verbose
+
+See `docs/loop.md <docs/loop.md>`__ for the task file format and
+bounded-tool policy.
+
 *******
  Usage
 *******
@@ -250,6 +275,8 @@ Following is a brief overview of different commands:
    -  ``--verbose`` / ``-v``: stream per-iteration token usage and tool
       calls to stdout.
    -  ``--log`` / ``--log-path PATH``: write TOML diagnostics to disk.
+   -  ``--reason``: enable adaptive thinking (Anthropic models only;
+      silently ignored for all other backends).
 
 #. ``code-scribe loop <task_file> -m <model_name_or_path>``: Run a
    repeated bounded loop in which each session starts fresh, reads the
@@ -264,6 +291,8 @@ Following is a brief overview of different commands:
       cycles (default 5).
    -  ``--agent-iterations`` / ``-niter N``: tool-call budget per cycle
       (default 12).
+   -  ``--reason``: enable adaptive thinking (Anthropic models only;
+      silently ignored for all other backends).
 
 For further detail on agent and loop internals see the in-tree docs:
 
@@ -296,19 +325,29 @@ prompt-driven translation and generation commands.
 
 When verbose mode is enabled, Codescribe prints per-iteration
 information including iteration number, token usage, tool calls, and a
-short status summary for each tool result. In loop mode it also writes:
+short status summary for each tool result. In loop mode it also writes
+on-disk artifacts under ``.codescribe/loop/`` for inspection and
+crash-resume:
 
--  ``.codescribe/loop/status.json``
--  ``.codescribe/loop/report.md``
+-  ``run.toml`` — run metadata (model, limits, run_id)
+-  ``state.toml`` — mutable loop state (loop index, current phase)
+-  ``execution.toml`` — event log for the most recent execution phase
+-  ``review_output.toml`` — review agent's structured output
+-  ``review.toml`` — event log for the review agent
 
 A typical verbose loop session looks like this:
 
 .. code:: text
 
-   ▶  loop 1
+   ▶  loop 1 [execution]
      iter 1
-       usage  in 1,353  out 81  total 1,434
-       ▸ read   prompt.md                                                 21 lines
+       │ Let me start by reading the task file and understanding the current state.
+       usage  in 2,517  out 162  total 2,679
+       ▸ read   specification.toml           # path: /path/to/specification.toml
+       ▸ bash   find . -type f ...           bash exit_code=0
+     iter 2
+       usage  in 4,481  out 69  total 4,550
+       ▸ read   PLAN.md                      # path: /path/to/PLAN.md
 
 Sessions stop when the agent emits a final answer or when the configured
 iteration limit is reached. If the limit is reached first, the run ends

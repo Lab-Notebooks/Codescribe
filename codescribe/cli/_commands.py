@@ -294,8 +294,8 @@ def format(seed_prompt_list: List[Path]) -> None:
     help="Write agent diagnostic events (TOML) to PATH (implies --log).",
 )
 @click.option(
-    "--reasoning",
-    "reasoning",
+    "--reason",
+    "reason",
     is_flag=True,
     help="Enable adaptive thinking (Anthropic models only; ignored for other backends).",
 )
@@ -306,7 +306,7 @@ def agent(
     verbose: bool,
     log_enabled: bool,
     log_path: Union[str, None],
-    reasoning: bool,
+    reason: bool,
 ) -> None:
     """
     \b
@@ -332,7 +332,7 @@ def agent(
         agent_iterations=agent_iterations,
         verbose=verbose,
         logging=effective_log,
-        reasoning=reasoning,
+        reason=reason,
     )
     click.echo(result)
 
@@ -391,8 +391,8 @@ def agent(
     help="Write agent diagnostic events (TOML) to PATH (implies --log).",
 )
 @click.option(
-    "--reasoning",
-    "reasoning",
+    "--reason",
+    "reason",
     is_flag=True,
     help="Enable adaptive thinking (Anthropic models only; ignored for other backends).",
 )
@@ -405,7 +405,7 @@ def loop(
     verbose: bool,
     log_enabled: bool,
     log_path: Union[str, None],
-    reasoning: bool,
+    reason: bool,
 ) -> None:
     """
     \b
@@ -433,6 +433,6 @@ def loop(
         verbose=verbose,
         logging=effective_log,
         workdir=Path(workdir) if workdir else None,
-        reasoning=reasoning,
+        reason=reason,
     )
     click.echo(result)

@@ -422,7 +422,7 @@ def prompt_loop(
     verbose: bool = False,
     logging: Optional[Union[Path, str]] = None,
     workdir: Optional[Union[Path, str]] = None,
-    reasoning: bool = False,
+    reason: bool = False,
 ) -> str:
     """Run a bounded execution → review loop.
 
@@ -444,7 +444,7 @@ def prompt_loop(
     workdir_path = Path(workdir).resolve() if workdir else Path.cwd().resolve()
     task_path = _ensure_within_workdir(Path(task_file), workdir_path)
 
-    neural_model = lib.set_neural_model(model, reasoning=reasoning)  # type: ignore[attr-defined]
+    neural_model = lib.set_neural_model(model, reasoning=reason)  # type: ignore[attr-defined]
 
     chat_history, meta = lib.load_chat_template(task_path, return_meta=True)
     bash_allow = set((meta.get("tools") or {}).get("bash") or [])

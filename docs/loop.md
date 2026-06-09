@@ -99,6 +99,9 @@ Neither list is written to disk between loops.
   model's preceding text that triggered the tool call).
 - Each `tool_end` event includes `output_preview` (first 500 chars of actual output),
   `ok` (bool), `error` (string or null), and `duration_ms`.
+- When `--reason` is passed, the `model_reasoning` field in `tool_start` events includes
+  extended thinking content in addition to preceding text. Verbose output token counts
+  reflect total usage including reasoning tokens.
 
 ## Anti-hallucination design
 

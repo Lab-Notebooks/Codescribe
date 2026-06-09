@@ -45,6 +45,10 @@ Tool calling:
 - Note: both `chat()` and `chat_with_tools()` prefer the streaming API
   (`client.messages.stream`) and fall back to non-streaming if the SDK or
   provider does not support it.
+- Adaptive thinking: pass `--reason` to `agent` or `loop` to enable extended
+  thinking. Supported on `claude-sonnet-4-6` and `claude-opus-*`. Silently
+  ignored on all other backends. Set `CODESCRIBE_AGENT_REASONING=1` as a
+  scripting/CI fallback.
 
 ## ARGO (`argo-*`)
 
