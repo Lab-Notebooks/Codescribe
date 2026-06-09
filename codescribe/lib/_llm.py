@@ -2,8 +2,19 @@ from __future__ import annotations
 
 import os, importlib, json, requests
 
-from typing import Any, List, Dict, Union
+from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
+
+__all__ = [
+    "OpenAICompModel",
+    "OpenAIModel",
+    "ArgoModel",
+    "AnthropicModel",
+    "TFModel",
+    "ALLOWED_MODEL_TYPES",
+    "Model",
+    "set_neural_model",
+]
 
 
 class _OpenAIBaseModel:
@@ -43,8 +54,12 @@ class _OpenAIBaseModel:
         )
 
     def format_tool_result_messages(
-        self, tool_calls: List[Dict[str, Any]], outputs: List[str]
+        self,
+        tool_calls: List[Dict[str, Any]],
+        outputs: List[str],
+        reasoning_blocks: Optional[List[Dict[str, Any]]] = None,  # noqa: ARG002
     ) -> List[Dict[str, Any]]:
+        # reasoning_blocks ignored — OpenAI has no equivalent exposed API.
         assistant_tool_calls = []
         for call in tool_calls:
             assistant_tool_calls.append(
@@ -201,9 +216,12 @@ class ArgoModel:
         }
 
     def format_tool_result_messages(
-        self, tool_calls: List[Dict[str, Any]], outputs: List[str]
+        self,
+        tool_calls: List[Dict[str, Any]],
+        outputs: List[str],
+        reasoning_blocks: Optional[List[Dict[str, Any]]] = None,  # noqa: ARG002
     ) -> List[Dict[str, Any]]:
-        # OpenAI-style tool result messages.
+        # OpenAI-style tool result messages. reasoning_blocks ignored.
         assistant_tool_calls = []
         for call in tool_calls:
             assistant_tool_calls.append(
@@ -256,6 +274,11 @@ class AnthropicModel:
         # Anthropic "max_tokens" is the maximum output tokens to generate.
         self.max_tokens = int(os.getenv("CODESCRIBE_MAX_TOKENS", "24576"))
         self.last_usage = None
+        # Set CODESCRIBE_AGENT_REASONING=1 to enable adaptive thinking on supported models
+        # (claude-opus-*/claude-sonnet-4-6). Do not set for Haiku or older models.
+        self.reasoning_enabled = os.getenv("CODESCRIBE_AGENT_REASONING", "").lower() in (
+            "1", "true", "yes"
+        )
 
     @property
     def supports_native_tools(self) -> bool:
@@ -329,6 +352,8 @@ class AnthropicModel:
         }
         if system:
             kwargs["system"] = system
+        if self.reasoning_enabled:
+            kwargs["thinking"] = {"type": "adaptive"}
 
         # Prefer streaming for long requests; accumulate events and normalize into
         # the same {text, tool_calls, usage} shape as non-streaming.
@@ -379,9 +404,15 @@ class AnthropicModel:
         return normalized
 
     def format_tool_result_messages(
-        self, tool_calls: List[Dict[str, Any]], outputs: List[str]
+        self,
+        tool_calls: List[Dict[str, Any]],
+        outputs: List[str],
+        reasoning_blocks: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
-        assistant_content = []
+        assistant_content: List[Dict[str, Any]] = []
+        # Reasoning (thinking) blocks must be echoed back verbatim before tool_use blocks.
+        for tb in reasoning_blocks or []:
+            assistant_content.append(tb)
         for call in tool_calls:
             assistant_content.append(
                 {
@@ -488,9 +519,12 @@ class TFModel:
         }
 
     def format_tool_result_messages(
-        self, tool_calls: List[Dict[str, Any]], outputs: List[str]
+        self,
+        tool_calls: List[Dict[str, Any]],
+        outputs: List[str],
+        reasoning_blocks: Optional[List[Dict[str, Any]]] = None,  # noqa: ARG002
     ) -> List[Dict[str, Any]]:
-        # OpenAI-style tool result messages.
+        # OpenAI-style tool result messages. reasoning_blocks ignored.
         assistant_tool_calls = []
         for call in tool_calls:
             assistant_tool_calls.append(
@@ -571,11 +605,19 @@ def _normalize_openai_usage(usage: Any) -> Any:
         "total_tokens",
         "input_tokens",
         "output_tokens",
-        "reasoning_tokens",
     ):
         value = getattr(usage, key, None)
         if value is not None:
             normalized[key] = value
+
+    # o1/o3/o4-mini models nest reasoning_tokens under completion_tokens_details.
+    details = getattr(usage, "completion_tokens_details", None)
+    rt = getattr(details, "reasoning_tokens", None) if details is not None else None
+    if rt is None:
+        # Some OpenAI-compatible providers expose it at the top level.
+        rt = getattr(usage, "reasoning_tokens", None)
+    if rt is not None:
+        normalized["reasoning_tokens"] = int(rt)
 
     if not normalized and hasattr(usage, "model_dump"):
         return usage.model_dump()
@@ -605,6 +647,8 @@ def _normalize_anthropic_usage(usage: Any) -> Any:
         ("output_tokens", "output_tokens"),
         ("cache_creation_input_tokens", "cache_creation_input_tokens"),
         ("cache_read_input_tokens", "cache_read_input_tokens"),
+        # Anthropic exposes thinking token usage when extended thinking is active.
+        ("thinking_tokens", "reasoning_tokens"),
     ):
         value = getattr(usage, src, None)
         if value is not None:
@@ -622,8 +666,20 @@ def _normalize_anthropic_tool_response(
 ) -> Dict[str, Any]:
     texts = []
     tool_calls = []
+    reasoning_parts: List[str] = []
+    # Raw dicts must keep Anthropic's wire format {"type":"thinking","thinking":"..."}
+    # so they can be echoed back verbatim in the next assistant turn.
+    reasoning_blocks: List[Dict[str, Any]] = []
     for block in response.content:
-        if block.type == "text":
+        if block.type == "thinking":
+            t = block.thinking or ""
+            reasoning_parts.append(t)
+            rb: Dict[str, Any] = {"type": "thinking", "thinking": t}
+            sig = getattr(block, "signature", None)
+            if sig:
+                rb["signature"] = sig
+            reasoning_blocks.append(rb)
+        elif block.type == "text":
             texts.append(block.text)
         elif block.type == "tool_use":
             tool_calls.append(
@@ -637,6 +693,8 @@ def _normalize_anthropic_tool_response(
         "text": "\n".join(t for t in texts if t).strip(),
         "tool_calls": tool_calls,
         "usage": usage,
+        "reasoning": "\n\n".join(t for t in reasoning_parts if t).strip(),
+        "reasoning_blocks": reasoning_blocks,
     }
 
 

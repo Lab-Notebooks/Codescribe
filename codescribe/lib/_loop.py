@@ -26,6 +26,17 @@ from typing import Any, Dict, List, Optional, Union
 
 from codescribe import lib
 
+__all__ = [
+    "LoopPaths",
+    "get_loop_paths",
+    "load_state",
+    "write_state",
+    "LoopSummary",
+    "build_system_prompt",
+    "build_execution_task",
+    "build_review_task",
+    "prompt_loop",
+]
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -306,6 +317,7 @@ def build_review_task(
     review_output_rel: str,
     loop_index: int,
     loop_summary: LoopSummary,
+    exec_answer: str = "",
 ) -> str:
     # Build a text representation of the harness-computed summary so the
     # review agent has verified facts without needing to parse any transcript.
@@ -335,12 +347,15 @@ def build_review_task(
         f"Review output: {review_output_rel} (write here)\n\n"
         "PHASE: REVIEW\n\n"
         f"{verified_block}\n\n"
-        "Your job:\n"
-        "1. Read the execution agent's <final_answer> for its self-reported results.\n"
-        "2. Cross-reference the final_answer claims against the verified actions above.\n"
+        + (
+            f"\n[Execution agent report — loop {loop_index}]\n\n{exec_answer}\n\n"
+            if exec_answer else ""
+        )
+        + "Your job:\n"
+        "1. Cross-reference the execution report's claims against the verified actions above.\n"
         "   File reads listed above are verified — treat the agent's claims about those\n"
         "   files as trustworthy. Only flag claims about files NOT in the verified list.\n"
-        "3. Write your assessment to the review output file in TOML format:\n\n"
+        "2. Write your assessment to the review output file in TOML format:\n\n"
         "   ```toml\n"
         f"   loop = {loop_index}\n"
         "   summary = \"One paragraph describing what actually happened.\"\n"
@@ -538,8 +553,10 @@ def prompt_loop(
         state["phase"] = "review"
         write_state(paths.state_toml, state)
 
-        # Review agent only needs to read files and write review_output.toml.
+        # Review agent: read/glob/write for state file handoff + restricted bash for diagnostics.
+        review_bash_allow = {"ls", "stat", "pwd", "find", "grep", "head", "tail", "which", "env", "rg"}
         review_tools = [t for t in tools if t.name in ("read", "glob", "write")]
+        review_tools.append(lib.BashTool(cwd=workdir_path, bounded=True, allowed_commands=review_bash_allow))
         review_agent = lib.Agent(
             neural_model,
             tools=review_tools,
@@ -554,17 +571,10 @@ def prompt_loop(
             review_output_rel=review_output_rel,
             loop_index=loop_idx,
             loop_summary=loop_summary,
+            exec_answer=exec_answer or "",
         )
 
-        # Give the review agent only the execution answer as prior context — not
-        # the full task chat_history — so it doesn't burn tokens re-reading the
-        # spec prompt.  The harness-computed summary in review_task already has
-        # all the verified facts it needs.
-        review_history: List[Dict[str, Any]] = []
-        if exec_answer:
-            review_history.append({"role": "user", "content": exec_answer})
-
-        _ = review_agent.run(review_task, system=system, chat_history=review_history)
+        _ = review_agent.run(review_task, system=system)
 
         # Read the review agent's structured output and update in-memory state.
         review_data = _read_review_output(paths.review_output_toml)

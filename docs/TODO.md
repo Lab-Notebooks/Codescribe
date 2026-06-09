@@ -51,6 +51,24 @@ Already documented:
 - Investigate deterministic sandboxing options for bounded mode.
 - Evaluate whether bounded mode should prefer structured tools over raw shell access.
 
+## Reasoning / thinking support
+
+### OpenAI Responses API (reasoning summaries)
+
+The current `OpenAIModel` and `OpenAICompModel` use the Chat Completions API
+(`chat.completions.create`), which only surfaces `completion_tokens_details.reasoning_tokens`
+as a count — no reasoning text.
+
+OpenAI exposes actual reasoning summaries via the **Responses API**
+(`client.responses.create`), which returns a `{"type":"reasoning","summary":[...]}` output
+item when `reasoning.summary="auto"` is set. This is a different request/response shape
+(input array, output items, `previous_response_id` for history) and requires a new model
+class (e.g. `OpenAIResponsesModel`) rather than changing the existing Chat Completions
+wrapper. Affects reasoning-capable models: `o3`, `o4-mini`, `gpt-5.x`.
+
+Already implemented: `reasoning_tokens` count extraction from
+`completion_tokens_details.reasoning_tokens` (see `_llm.py`).
+
 ## Observability
 
 Already implemented:

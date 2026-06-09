@@ -7,6 +7,14 @@ from alive_progress import alive_bar
 
 from codescribe import lib
 
+__all__ = [
+    "prompt_translate",
+    "prompt_inspect",
+    "prompt_generate",
+    "prompt_update",
+    "prompt_agent",
+]
+
 
 def prompt_translate(
     mapping: List[str],

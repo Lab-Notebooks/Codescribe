@@ -1,6 +1,8 @@
 from click import command, option, Option, UsageError, Context
 from typing import Any, Dict, List, Set
 
+__all__ = ["MutuallyExclusiveOption"]
+
 
 class MutuallyExclusiveOption(Option):
     def __init__(self, *args: Any, **kwargs: Dict[str, Any]) -> None:

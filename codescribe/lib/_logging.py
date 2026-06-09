@@ -17,6 +17,22 @@ import toml
 
 from codescribe import lib
 
+__all__ = [
+    "write_archive_toml",
+    "iso_utc_now",
+    "new_run_id",
+    "atomic_write_text",
+    "atomic_write_toml",
+    "read_toml",
+    "append_toml_event",
+    "read_toml_events",
+    "ToolLogSink",
+    "NullToolLogSink",
+    "MultiToolLogSink",
+    "ToolLogToml",
+    "Timer",
+]
+
 def write_archive_toml(chat_entries: List[Dict[str, str]], neural_model: object) -> None:
     """Write a chat archive TOML file under `.codescribe/chat/`.
 

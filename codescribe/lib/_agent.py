@@ -3,9 +3,12 @@
 import copy
 import json
 import re
+import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from codescribe import lib
+
+__all__ = ["Agent"]
 
 # Keep this short and non-format-prescriptive: native tool calls are the "Action"
 # and tool result messages are the "Observation".
@@ -35,6 +38,7 @@ Rules:
 _DEFAULT_MAX_TOOL_CALLS_TOTAL = 120
 _DEFAULT_MAX_TOOL_CALLS_PER_ITERATION = 10
 _DEFAULT_MAX_REPEATED_CALLS = 2
+_DEFAULT_MAX_CONSECUTIVE_ERROR_ITERS = 3
 
 
 def _count_tokens(text: str) -> int:
@@ -53,16 +57,17 @@ def _count_message_tokens(messages: List[Dict[str, Any]]) -> int:
     return total
 
 
-def _usage_in_out(usage: Optional[Dict[str, Any]]) -> Tuple[int, int]:
+def _usage_in_out(usage: Optional[Dict[str, Any]]) -> Tuple[int, int, int]:
     if not usage:
-        return 0, 0
+        return 0, 0, 0
     input_tokens = usage.get("prompt_tokens")
     if input_tokens is None:
         input_tokens = usage.get("input_tokens", 0)
     output_tokens = usage.get("completion_tokens")
     if output_tokens is None:
         output_tokens = usage.get("output_tokens", 0)
-    return int(input_tokens or 0), int(output_tokens or 0)
+    reasoning_tokens = int(usage.get("reasoning_tokens", 0) or 0)
+    return int(input_tokens or 0), int(output_tokens or 0), reasoning_tokens
 
 
 def _fmt_args(name: str, args: Dict[str, Any]) -> str:
@@ -78,6 +83,15 @@ def _fmt_args(name: str, args: Dict[str, Any]) -> str:
         return f"{path}  ({n} edit{'s' if n != 1 else ''})"
     s = json.dumps(args, ensure_ascii=False)
     return (s[:60] + "…") if len(s) > 60 else s
+
+
+def _print_reasoning_block(text: str) -> None:
+    """Print reasoning lines prefixed with │, dimmed when stdout is a TTY."""
+    use_ansi = getattr(sys.stdout, "isatty", lambda: False)()
+    dim = "\033[2m" if use_ansi else ""
+    reset = "\033[0m" if use_ansi else ""
+    for line in (text.splitlines() or [""]):
+        print(f"    │ {dim}{line}{reset}")
 
 
 def _is_error_output(output: str) -> bool:
@@ -250,6 +264,7 @@ class Agent:
         self._max_tool_calls_total = _DEFAULT_MAX_TOOL_CALLS_TOTAL
         self._max_tool_calls_per_iteration = _DEFAULT_MAX_TOOL_CALLS_PER_ITERATION
         self._max_repeated_calls = _DEFAULT_MAX_REPEATED_CALLS
+        self._max_consecutive_error_iters = _DEFAULT_MAX_CONSECUTIVE_ERROR_ITERS
         # Per-run state
         self._state: Dict[str, Any] = {}
 
@@ -354,6 +369,7 @@ class Agent:
             "call_counts": {},  # key -> count
             "recent": [],  # list[{tool,args_preview,summary,ok}]
             "recent_errors": [],
+            "consecutive_error_iters": 0,
         }
 
     def _record_tool_result(self, name: str, args: Dict[str, Any], output: str) -> None:
@@ -441,6 +457,7 @@ class Agent:
 
         total_input_tokens = 0
         total_output_tokens = 0
+        total_reasoning_tokens = 0
         empty_reply_nudged = False
 
         run_id = lib.new_run_id()
@@ -475,11 +492,13 @@ class Agent:
             response = self.model.chat_with_tools(messages, self._tool_schemas())
             text = (response.get("text") or "").strip()
             tool_calls = response.get("tool_calls") or []
+            reasoning = (response.get("reasoning") or "").strip()
             usage = response.get("usage") or getattr(self.model, "last_usage", None)
-            input_tokens, output_tokens = _usage_in_out(usage)
+            input_tokens, output_tokens, reasoning_tokens = _usage_in_out(usage)
             if usage:
                 total_input_tokens += input_tokens
                 total_output_tokens += output_tokens
+                total_reasoning_tokens += reasoning_tokens
             else:
                 total_input_tokens += _count_message_tokens(messages)
                 output_text = text
@@ -489,9 +508,12 @@ class Agent:
 
             if self.show_diagnostics:
                 print(f"  iter {iteration + 1}")
+                if reasoning:
+                    _print_reasoning_block(reasoning)
+                rsn_part = f"  rsn {reasoning_tokens:,}" if reasoning_tokens else ""
                 print(
                     f"    usage  in {input_tokens:,}  "
-                    f"out {output_tokens:,}  "
+                    f"out {output_tokens:,}{rsn_part}  "
                     f"total {input_tokens + output_tokens:,}"
                 )
 
@@ -505,6 +527,7 @@ class Agent:
                     "tool_calls": len(tool_calls),
                     "usage": usage,
                     "model_text": text[:500] if text else None,
+                    "model_reasoning": reasoning[:500] if reasoning else None,
                 }
             )
 
@@ -631,8 +654,33 @@ class Agent:
                     )
 
                 messages.extend(
-                    self.model.format_tool_result_messages(executed_calls, outputs)
+                    self.model.format_tool_result_messages(
+                        executed_calls,
+                        outputs,
+                        reasoning_blocks=response.get("reasoning_blocks"),
+                    )
                 )
+
+                # Stuck-loop detection: count consecutive iterations where every
+                # tool call failed; nudge the agent to emit a BLOCKED answer.
+                real_outputs = [o for o in outputs if not o.startswith("Note:")]
+                if real_outputs and all(_is_error_output(o) for o in real_outputs):
+                    self._state["consecutive_error_iters"] = self._state.get("consecutive_error_iters", 0) + 1
+                else:
+                    self._state["consecutive_error_iters"] = 0
+
+                if self._state.get("consecutive_error_iters", 0) >= self._max_consecutive_error_iters:
+                    self._state["consecutive_error_iters"] = 0
+                    _stuck = (
+                        "Every tool call for several consecutive iterations has failed. "
+                        "Stop attempting tool calls and output a BLOCKED: section "
+                        "listing exactly what is preventing progress and what the user must resolve."
+                    )
+                    last = messages[-1]
+                    if isinstance(last.get("content"), str):
+                        messages[-1] = dict(last, content=last["content"] + "\n\n" + _stuck)
+                    else:
+                        messages.append({"role": "user", "content": _stuck})
 
                 self._emit(
                     {
@@ -648,9 +696,10 @@ class Agent:
                 if self.show_diagnostics:
                     print()
                     total = total_input_tokens + total_output_tokens
+                    rsn_part = f"  rsn {total_reasoning_tokens:,}" if total_reasoning_tokens else ""
                     print(
                         f"  tokens  in {total_input_tokens:,}  "
-                        f"out {total_output_tokens:,}  "
+                        f"out {total_output_tokens:,}{rsn_part}  "
                         f"total {total:,}"
                     )
 
@@ -662,6 +711,7 @@ class Agent:
                         "stop_reason": "final_text",
                         "total_input_tokens": total_input_tokens,
                         "total_output_tokens": total_output_tokens,
+                        "total_reasoning_tokens": total_reasoning_tokens,
                     }
                 )
                 return text
@@ -680,14 +730,19 @@ class Agent:
                         "Reply with either tool_calls (to take an action) "
                         "or a final answer as text."
                     )
-                messages.append({"role": "user", "content": nudge})
+                last = messages[-1]
+                if isinstance(last.get("content"), str):
+                    messages[-1] = dict(last, content=last["content"] + "\n\n" + nudge)
+                else:
+                    messages.append({"role": "user", "content": nudge})
                 continue
 
         if self.show_diagnostics:
             total = total_input_tokens + total_output_tokens
+            rsn_part = f"  rsn {total_reasoning_tokens:,}" if total_reasoning_tokens else ""
             print(
                 f"  tokens  in {total_input_tokens:,}  "
-                f"out {total_output_tokens:,}  "
+                f"out {total_output_tokens:,}{rsn_part}  "
                 f"total {total:,}"
             )
 
@@ -699,6 +754,7 @@ class Agent:
                 "stop_reason": "max_iterations",
                 "total_input_tokens": total_input_tokens,
                 "total_output_tokens": total_output_tokens,
+                "total_reasoning_tokens": total_reasoning_tokens,
             }
         )
 
