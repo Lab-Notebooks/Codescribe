@@ -61,6 +61,20 @@ code-generation and maintenance tasks.
 -  Language Model Integration: Use OpenAI, Anthropic, ARGO,
    OpenAI-compatible endpoints, or local Transformers checkpoints.
 
+-  Multi-Agent Workflows: A developer authors task files that coordinate
+   multiple specialized subagents. For example, a Fortran-to-C++
+   pipeline may span three phases:
+
+   -  **Planning** — an indexing tool scans the codebase and a Neural
+      Inspection subagent identifies files with similar code patterns,
+      producing TOML chat-completion templates as context.
+   -  **Execution** — a Draft Generation tool and Neural Translation
+      subagent consume those templates to produce C++ source files and
+      Fortran-C interface layers.
+   -  **Testing** — a Testing subagent validates the output inside a
+      Ralph Loop harness; failures cycle back to execution while
+      successes yield the final C++ codebase.
+
    |fig2|
 
 -  Fortran-C++ Interfaces: Generate the necessary interface layers
@@ -89,9 +103,7 @@ iteratively converting the code, is a more practical approach.
 Codescribe supports this process by automating the creation of these
 interfaces and assisting with generative AI to improve efficiency and
 accuracy, ensuring that performance and functionality are maintained
-throughout the conversion. Additionally, Codescribe facilitates code
-generation and updates, enabling users to create new applications or
-modify existing files seamlessly.
+throughout the conversion.
 
 **************
  Installation
@@ -118,9 +130,6 @@ To also install the optional Hugging Face / Transformers backend:
 .. code:: bash
 
    pip install -e ".[transformers]"
-
-Editable mode enables testing of features/updates directly from the
-source code and is an effective method for debugging.
 
 ***************
  Quick Start
@@ -302,19 +311,14 @@ Following is a brief overview of different commands:
    -  ``--reason``: enable adaptive thinking (Anthropic models only;
       silently ignored for all other backends).
 
-For further detail on agent and loop internals see the in-tree docs:
-
--  ``docs/agent.md`` — agent architecture and bounded-mode policy
--  ``docs/loop.md`` — loop mode internals and on-disk artifacts
--  ``docs/tools.md`` — tool implementations (read/glob/bash/edit/write)
--  ``docs/models.md`` — model backends and environment variables
-
 ***************
  Agentic Modes
 ***************
 
 Codescribe includes two agent-oriented workflows in addition to the
-prompt-driven translation and generation commands.
+prompt-driven translation and generation commands. For deeper detail see
+the in-tree docs: ``docs/agent.md``, ``docs/loop.md``,
+``docs/tools.md``, ``docs/models.md``, and ``docs/cmd.md``.
 
 #. **Agent mode** runs a single tool-using agent session on a task.
    The available tools are:
