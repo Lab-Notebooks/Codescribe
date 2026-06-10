@@ -491,18 +491,6 @@ backend you select.
 -  ``ARGO_USER`` and ``ARGO_API_ENDPOINT`` for ``argo-*`` models
 -  ``OPENAI_COMP_BASEURL``, ``OPENAI_COMP_PROVIDER``, and
    ``OPENAI_COMP_APIKEY`` for ``oaic-*`` models
--  ``CODESCRIBE_ARCHIVE``: directory path for saving LLM interaction
-   transcripts for downstream analysis or debugging
-
-To archive interactions with LLMs, set ``CODESCRIBE_ARCHIVE`` to a
-directory path where the interactions will be stored:
-
-.. code:: bash
-
-   export CODESCRIBE_ARCHIVE="/path/to/archive/directory"
-
-Archived conversations are written as TOML files under a dated folder
-structure.
 
 *************************************
  Bounded Loop Diagnostics and Caveats
