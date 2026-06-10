@@ -3,14 +3,14 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "Codescribe"
+name = "CodeScribe"
 version = "2026.dev"
-authors = [{ name = "Codescribe Contributors" }]
-description = "Coding Agent and Translation Utility"
+authors = [{ name = "CodeScribe Contributors" }]
+description = "Coding Agent and Code Translation Utility"
 license = { text = "Apache 2.0" }
 readme = "README.rst"
 classifiers = [
-    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.8+",
     "License :: OSI Approved :: Apache Software License",
 ]
 dependencies = [
