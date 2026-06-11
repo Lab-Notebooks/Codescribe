@@ -457,18 +457,19 @@ def prompt_loop(
     task_rel = str(task_path.relative_to(workdir_path))
     review_output_rel = str(paths.review_output_toml.relative_to(workdir_path))
 
-    lib.atomic_write_toml(
-        paths.run_toml,
-        {
-            "run_id": run_id,
-            "created_at": lib.iso_utc_now(),
-            "workdir": str(workdir_path),
-            "task_file": str(task_path),
-            "model": str(model),
-            "agent_loops": int(agent_loops),
-            "agent_iterations": int(agent_iterations),
-        },
-    )
+    run_toml_data: Dict[str, Any] = {
+        "run_id": run_id,
+        "created_at": lib.iso_utc_now(),
+        "workdir": str(workdir_path),
+        "task_file": str(task_path),
+        "model": str(model),
+        "agent_loops": int(agent_loops),
+        "agent_iterations": int(agent_iterations),
+        "cumulative_input_tokens": 0,
+        "cumulative_output_tokens": 0,
+        "loops_completed": 0,
+    }
+    lib.atomic_write_toml(paths.run_toml, run_toml_data)
 
     state = _init_state(run_id=run_id, workdir=workdir_path, task_file=task_path)
     write_state(paths.state_toml, state)
@@ -479,6 +480,7 @@ def prompt_loop(
     # In-memory cross-loop state — never written to files between loops.
     # -----------------------------------------------------------------
     loop_summaries: List[LoopSummary] = []
+    review_summaries: List[LoopSummary] = []
     pending_items: List[str] = []
 
     loops_completed = 0
@@ -543,6 +545,12 @@ def prompt_loop(
         # agent has a starting point even if it can't improve on them.
         pending_items = _extract_pending_items(exec_answer or "")
 
+        # Update run.toml with cumulative token usage after each execution phase.
+        run_toml_data["cumulative_input_tokens"] = sum(s.total_input_tokens for s in loop_summaries) + sum(s.total_input_tokens for s in review_summaries)
+        run_toml_data["cumulative_output_tokens"] = sum(s.total_output_tokens for s in loop_summaries) + sum(s.total_output_tokens for s in review_summaries)
+        run_toml_data["loops_completed"] = loop_idx
+        lib.atomic_write_toml(paths.run_toml, run_toml_data)
+
         loops_completed = loop_idx
 
         # ----------------------
@@ -576,6 +584,12 @@ def prompt_loop(
         )
 
         _ = review_agent.run(review_task, system=system)
+
+        review_events = lib.read_toml_events(paths.run_dir / "review.toml")
+        review_summaries.append(_compute_loop_summary(loop_idx, review_events))
+        run_toml_data["cumulative_input_tokens"] = sum(s.total_input_tokens for s in loop_summaries) + sum(s.total_input_tokens for s in review_summaries)
+        run_toml_data["cumulative_output_tokens"] = sum(s.total_output_tokens for s in loop_summaries) + sum(s.total_output_tokens for s in review_summaries)
+        lib.atomic_write_toml(paths.run_toml, run_toml_data)
 
         # Read the review agent's structured output and update in-memory state.
         review_data = _read_review_output(paths.review_output_toml)
