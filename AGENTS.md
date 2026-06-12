@@ -1,2 +1,2 @@
-- IGNORE: *.dev/, *.dev
+- IGNORE: *.dev/, *.dev, Maplefile
 - CARD: AGENT.json
