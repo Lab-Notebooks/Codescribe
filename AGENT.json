@@ -2,6 +2,7 @@
   "schema_version": "1.0",
   "name": "CodeScribe",
   "title": "CodeScribe — agent card",
+  "repository": "https://github.com/Lab-Notebooks/CodeScribe",
   "what_this_repo_is": {
     "summary": "AI-assisted framework for scientific software development: incremental Fortran→C++ translation plus code inspection/generation/update and tool-using agent workflows.",
     "capabilities": [
