@@ -124,6 +124,8 @@ class LoopSummary:
     errors: List[str] = field(default_factory=list)
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
 
 
 def _compute_loop_summary(loop_index: int, events: List[Dict[str, Any]]) -> LoopSummary:
@@ -186,6 +188,8 @@ def _compute_loop_summary(loop_index: int, events: List[Dict[str, Any]]) -> Loop
         elif ev.get("event") == "run_end":
             summary.total_input_tokens = int(ev.get("total_input_tokens") or 0)
             summary.total_output_tokens = int(ev.get("total_output_tokens") or 0)
+            summary.total_cache_creation_tokens = int(ev.get("total_cache_creation_tokens") or 0)
+            summary.total_cache_read_tokens = int(ev.get("total_cache_read_tokens") or 0)
 
     return summary
 
@@ -196,15 +200,22 @@ def _compute_loop_summary(loop_index: int, events: List[Dict[str, Any]]) -> Loop
 
 def build_system_prompt(*, workdir: Path) -> str:
     return (
-        "You are an autonomous coding agent specializing in test-driven repair. "
-        "NEVER fabricate command results, test output, or file contents — "
-        "if you need information, read a file or run a command and report verbatim output. "
-        "Determine project state by reading files and running commands; never assume or infer. "
-        "IMPORTANT: Only access files and paths within the working directory. "
-        "In bash commands, only use relative paths or paths under the working directory. "
-        "Never target system directories or paths outside the working directory. "
-        "Avoid unnecessary file re-reads, but re-read whenever you need exact text, "
-        "line context, or verification before/after edits."
+        "You are an autonomous coding agent specializing in test-driven development and repair.\n\n"
+        "Core rules:\n"
+        "- NEVER fabricate command results, test output, or file contents — always call a tool.\n"
+        "- Determine project state by reading files and running commands; never assume or infer.\n"
+        "- Only access files and paths within the working directory; never target system directories.\n"
+        "- In bash commands, only use relative paths or paths under the working directory.\n\n"
+        "Efficiency rules (critical for speed):\n"
+        "- Batch ALL independent reads and globs into the first turn — fetch everything you need before acting.\n"
+        "- Once you have identified the changes needed, implement them immediately without further exploration.\n"
+        "- Do not re-read files you have already read unless they were modified since your last read.\n"
+        "- Prefer a single comprehensive edit over multiple small edits to the same file.\n"
+        "- Run tests after each meaningful code change — do not defer validation to the end.\n"
+        "- When all tests pass and all pending items are resolved, stop immediately — do not invent further work.\n\n"
+        "Tool guidance:\n"
+        "- Use glob to discover structure, read for content, bash for running commands and tests.\n"
+        "- Use edit for targeted changes; use write only when creating new files or doing full rewrites.\n"
     )
 
 
@@ -267,6 +278,7 @@ def build_execution_task(
     *,
     workdir: Path,
     task_rel: str,
+    task_content: str = "",
     loop_idx: int,
     agent_loops: int,
     loop_summaries: List[LoopSummary],
@@ -278,10 +290,13 @@ def build_execution_task(
         loop_summaries=loop_summaries,
         pending_items=pending_items,
     )
-    # In the first loop, direct the agent to read the task file.  In subsequent
-    # loops the spec is already in the chat history and the file inventory above
-    # describes all work done — re-reading wastes 2-3 iterations per loop.
-    if loop_idx == 1:
+    if loop_idx == 1 and task_content:
+        # Pre-inject the spec so the agent skips the read-to-orient round-trip.
+        orient_step = (
+            "1. The full task specification is provided below — do NOT re-read the task file.\n\n"
+            f"<task_specification>\n{task_content}\n</task_specification>\n"
+        )
+    elif loop_idx == 1:
         orient_step = "1. Read the task file to orient yourself on the specification.\n"
     else:
         orient_step = (
@@ -467,6 +482,8 @@ def prompt_loop(
         "agent_iterations": int(agent_iterations),
         "cumulative_input_tokens": 0,
         "cumulative_output_tokens": 0,
+        "cumulative_cache_creation_tokens": 0,
+        "cumulative_cache_read_tokens": 0,
         "loops_completed": 0,
     }
     lib.atomic_write_toml(paths.run_toml, run_toml_data)
@@ -525,9 +542,17 @@ def prompt_loop(
             logging=exec_log,
         )
 
+        task_content = ""
+        if loop_idx == 1:
+            try:
+                task_content = (workdir_path / task_rel).read_text(errors="replace")
+            except OSError:
+                pass
+
         exec_task = build_execution_task(
             workdir=workdir_path,
             task_rel=task_rel,
+            task_content=task_content,
             loop_idx=loop_idx,
             agent_loops=agent_loops,
             loop_summaries=loop_summaries,
@@ -546,8 +571,11 @@ def prompt_loop(
         pending_items = _extract_pending_items(exec_answer or "")
 
         # Update run.toml with cumulative token usage after each execution phase.
-        run_toml_data["cumulative_input_tokens"] = sum(s.total_input_tokens for s in loop_summaries) + sum(s.total_input_tokens for s in review_summaries)
-        run_toml_data["cumulative_output_tokens"] = sum(s.total_output_tokens for s in loop_summaries) + sum(s.total_output_tokens for s in review_summaries)
+        all_summaries = loop_summaries + review_summaries
+        run_toml_data["cumulative_input_tokens"] = sum(s.total_input_tokens for s in all_summaries)
+        run_toml_data["cumulative_output_tokens"] = sum(s.total_output_tokens for s in all_summaries)
+        run_toml_data["cumulative_cache_creation_tokens"] = sum(s.total_cache_creation_tokens for s in all_summaries)
+        run_toml_data["cumulative_cache_read_tokens"] = sum(s.total_cache_read_tokens for s in all_summaries)
         run_toml_data["loops_completed"] = loop_idx
         lib.atomic_write_toml(paths.run_toml, run_toml_data)
 
@@ -587,8 +615,11 @@ def prompt_loop(
 
         review_events = lib.read_toml_events(paths.run_dir / "review.toml")
         review_summaries.append(_compute_loop_summary(loop_idx, review_events))
-        run_toml_data["cumulative_input_tokens"] = sum(s.total_input_tokens for s in loop_summaries) + sum(s.total_input_tokens for s in review_summaries)
-        run_toml_data["cumulative_output_tokens"] = sum(s.total_output_tokens for s in loop_summaries) + sum(s.total_output_tokens for s in review_summaries)
+        all_summaries = loop_summaries + review_summaries
+        run_toml_data["cumulative_input_tokens"] = sum(s.total_input_tokens for s in all_summaries)
+        run_toml_data["cumulative_output_tokens"] = sum(s.total_output_tokens for s in all_summaries)
+        run_toml_data["cumulative_cache_creation_tokens"] = sum(s.total_cache_creation_tokens for s in all_summaries)
+        run_toml_data["cumulative_cache_read_tokens"] = sum(s.total_cache_read_tokens for s in all_summaries)
         lib.atomic_write_toml(paths.run_toml, run_toml_data)
 
         # Read the review agent's structured output and update in-memory state.

@@ -6,12 +6,12 @@ import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
+from alive_progress import alive_bar
+
 from codescribe import lib
 
 __all__ = ["Agent"]
 
-# Keep this short and non-format-prescriptive: native tool calls are the "Action"
-# and tool result messages are the "Observation".
 _REACT_NUDGE = """\
 You are a coding agent with access to tools.
 
@@ -26,12 +26,14 @@ Rules:
 - Be concise and practical.
 - Use tools whenever you need to inspect files, run commands, or change the filesystem.
 - Do NOT fabricate tool outputs. If you need info, call a tool.
-- You may batch multiple independent reads or globs in the same turn.
+- Batch ALL independent reads and globs into a single turn before acting — gather everything you need first, then implement.
+- Once you have the information needed, implement immediately without further exploration.
+- Do not re-read files you have already read unless they were modified since your last read.
+- Prefer one comprehensive edit over multiple small edits to the same file.
 - IMPORTANT: Only use the tools listed here. For shell work, ONLY use the bash tool and ONLY run commands that succeed under the bash tool's safety policy. If a command is blocked, pick an allowed alternative.
 - Avoid repeating identical tool calls with the same arguments unless the workspace changed (e.g., after an edit).
 - Before using edit, ensure you have read the exact file region you are changing.
-- If an edit is important or risky, read back a small slice to confirm it applied as intended.
-- When you have enough information and all required actions are complete, respond with the final answer as normal text.
+- When all required actions are complete, respond with the final answer immediately — do not do additional cleanup or exploration.
 """
 
 # Internal defaults (kept out of the public Agent interface)
@@ -57,9 +59,9 @@ def _count_message_tokens(messages: List[Dict[str, Any]]) -> int:
     return total
 
 
-def _usage_in_out(usage: Optional[Dict[str, Any]]) -> Tuple[int, int, int]:
+def _usage_in_out(usage: Optional[Dict[str, Any]]) -> Tuple[int, int, int, int, int]:
     if not usage:
-        return 0, 0, 0
+        return 0, 0, 0, 0, 0
     input_tokens = usage.get("prompt_tokens")
     if input_tokens is None:
         input_tokens = usage.get("input_tokens", 0)
@@ -67,7 +69,9 @@ def _usage_in_out(usage: Optional[Dict[str, Any]]) -> Tuple[int, int, int]:
     if output_tokens is None:
         output_tokens = usage.get("output_tokens", 0)
     reasoning_tokens = int(usage.get("reasoning_tokens", 0) or 0)
-    return int(input_tokens or 0), int(output_tokens or 0), reasoning_tokens
+    cache_creation_tokens = int(usage.get("cache_creation_input_tokens", 0) or 0)
+    cache_read_tokens = int(usage.get("cache_read_input_tokens", 0) or 0)
+    return int(input_tokens or 0), int(output_tokens or 0), reasoning_tokens, cache_creation_tokens, cache_read_tokens
 
 
 def _fmt_args(name: str, args: Dict[str, Any]) -> str:
@@ -416,22 +420,46 @@ class Agent:
 
     @staticmethod
     def _upsert_workspace_context(messages: List[Dict[str, Any]], block: str) -> None:
-        """Insert or replace a system message that holds the WORKSPACE CONTEXT block."""
-        msg = {"role": "system", "content": block}
-        for i, m in enumerate(messages):
-            if (
-                m.get("role") == "system"
-                and isinstance(m.get("content"), str)
-                and m["content"].startswith("WORKSPACE CONTEXT")
-            ):
-                messages[i] = msg
+        """Append or update WORKSPACE CONTEXT on the last user message.
+
+        Keeping this out of the system prompt lets the static system message stay
+        identical across every iteration, which is required for Anthropic prompt
+        caching to hit.  Attaching the block to the last user message (string or
+        tool-result blocks) is semantically equivalent and does not break turn
+        alternation rules.
+        """
+        _MARKER = "WORKSPACE CONTEXT"
+
+        for i in range(len(messages) - 1, -1, -1):
+            m = messages[i]
+            if m.get("role") != "user":
+                continue
+            c = m.get("content", "")
+
+            if isinstance(c, str):
+                # Strip any prior workspace block then append the fresh one.
+                tag = "\n\n" + _MARKER
+                idx = c.find(tag)
+                base = c[:idx] if idx >= 0 else (c if not c.startswith(_MARKER) else "")
+                messages[i] = dict(m, content=(base + "\n\n" + block).lstrip())
                 return
-        # Insert after the first system message if present, else prepend.
-        for i, m in enumerate(messages):
-            if m.get("role") == "system":
-                messages.insert(i + 1, msg)
+
+            if isinstance(c, list):
+                # Drop any previous workspace text block and append the new one.
+                kept = [
+                    b for b in c
+                    if not (
+                        isinstance(b, dict)
+                        and b.get("type") == "text"
+                        and b.get("text", "").startswith(_MARKER)
+                    )
+                ]
+                kept.append({"type": "text", "text": block})
+                messages[i] = dict(m, content=kept)
                 return
-        messages.insert(0, msg)
+
+        # No user message found yet — prepend as the first user message.
+        messages.append({"role": "user", "content": block})
 
     def run(
         self,
@@ -458,6 +486,8 @@ class Agent:
         total_input_tokens = 0
         total_output_tokens = 0
         total_reasoning_tokens = 0
+        total_cache_creation_tokens = 0
+        total_cache_read_tokens = 0
         empty_reply_nudged = False
 
         run_id = lib.new_run_id()
@@ -489,16 +519,32 @@ class Agent:
             )
 
             model_timer = lib.Timer()
-            response = self.model.chat_with_tools(messages, self._tool_schemas())
+            if self.show_diagnostics:
+                with alive_bar(
+                    None,
+                    title=f"  iter {iteration + 1}",
+                    spinner="waves",
+                    bar=None,
+                    monitor=False,
+                    stats=False,
+                    elapsed=True,
+                    receipt=True,
+                ):
+                    response = self.model.chat_with_tools(messages, self._tool_schemas())
+            else:
+                response = self.model.chat_with_tools(messages, self._tool_schemas())
+
             text = (response.get("text") or "").strip()
             tool_calls = response.get("tool_calls") or []
             reasoning = (response.get("reasoning") or "").strip()
             usage = response.get("usage") or getattr(self.model, "last_usage", None)
-            input_tokens, output_tokens, reasoning_tokens = _usage_in_out(usage)
+            input_tokens, output_tokens, reasoning_tokens, cache_creation_tokens, cache_read_tokens = _usage_in_out(usage)
             if usage:
                 total_input_tokens += input_tokens
                 total_output_tokens += output_tokens
                 total_reasoning_tokens += reasoning_tokens
+                total_cache_creation_tokens += cache_creation_tokens
+                total_cache_read_tokens += cache_read_tokens
             else:
                 total_input_tokens += _count_message_tokens(messages)
                 output_text = text
@@ -507,14 +553,17 @@ class Agent:
                 total_output_tokens += _count_tokens(output_text) if output_text else 0
 
             if self.show_diagnostics:
-                print(f"  iter {iteration + 1}")
                 if reasoning:
                     _print_reasoning_block(reasoning)
                 rsn_part = f"  rsn {reasoning_tokens:,}" if reasoning_tokens else ""
+                cache_part = (
+                    f"  cache_write {cache_creation_tokens:,}  cache_read {cache_read_tokens:,}"
+                    if cache_creation_tokens or cache_read_tokens else ""
+                )
                 print(
                     f"    usage  in {input_tokens:,}  "
-                    f"out {output_tokens:,}{rsn_part}  "
-                    f"total {input_tokens + output_tokens:,}"
+                    f"out {output_tokens:,}{rsn_part}{cache_part}  "
+                    f"total {input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens:,}"
                 )
 
             self._emit(
@@ -695,11 +744,15 @@ class Agent:
             if text:
                 if self.show_diagnostics:
                     print()
-                    total = total_input_tokens + total_output_tokens
+                    total = total_input_tokens + total_cache_creation_tokens + total_cache_read_tokens + total_output_tokens
                     rsn_part = f"  rsn {total_reasoning_tokens:,}" if total_reasoning_tokens else ""
+                    cache_part = (
+                        f"  cache_write {total_cache_creation_tokens:,}  cache_read {total_cache_read_tokens:,}"
+                        if total_cache_creation_tokens or total_cache_read_tokens else ""
+                    )
                     print(
                         f"  tokens  in {total_input_tokens:,}  "
-                        f"out {total_output_tokens:,}{rsn_part}  "
+                        f"out {total_output_tokens:,}{rsn_part}{cache_part}  "
                         f"total {total:,}"
                     )
 
@@ -712,6 +765,8 @@ class Agent:
                         "total_input_tokens": total_input_tokens,
                         "total_output_tokens": total_output_tokens,
                         "total_reasoning_tokens": total_reasoning_tokens,
+                        "total_cache_creation_tokens": total_cache_creation_tokens,
+                        "total_cache_read_tokens": total_cache_read_tokens,
                     }
                 )
                 return text
@@ -740,9 +795,13 @@ class Agent:
         if self.show_diagnostics:
             total = total_input_tokens + total_output_tokens
             rsn_part = f"  rsn {total_reasoning_tokens:,}" if total_reasoning_tokens else ""
+            cache_part = (
+                f"  cache_write {total_cache_creation_tokens:,}  cache_read {total_cache_read_tokens:,}"
+                if total_cache_creation_tokens or total_cache_read_tokens else ""
+            )
             print(
                 f"  tokens  in {total_input_tokens:,}  "
-                f"out {total_output_tokens:,}{rsn_part}  "
+                f"out {total_output_tokens:,}{rsn_part}{cache_part}  "
                 f"total {total:,}"
             )
 
@@ -755,6 +814,8 @@ class Agent:
                 "total_input_tokens": total_input_tokens,
                 "total_output_tokens": total_output_tokens,
                 "total_reasoning_tokens": total_reasoning_tokens,
+                "total_cache_creation_tokens": total_cache_creation_tokens,
+                "total_cache_read_tokens": total_cache_read_tokens,
             }
         )
 

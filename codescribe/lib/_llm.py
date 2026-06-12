@@ -272,13 +272,18 @@ class AnthropicModel:
             raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
 
         self.base_url = os.getenv("ANTHROPIC_BASE_URL")
+        self.prompt_caching = os.getenv("CODESCRIBE_ANTHROPIC_CACHE", "1").lower() not in ("0", "false", "no")
         client_kwargs = {"api_key": self.apikey}
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
+        if self.prompt_caching:
+            # Request 1-hour cache TTL instead of the default 5 minutes so the
+            # system prompt and tool schemas stay warm across loop boundaries.
+            client_kwargs["default_headers"] = {"anthropic-beta": "extended-cache-ttl-2025-04-11"}
 
         self.client = anthropic.Anthropic(**client_kwargs)
         self.model = model
-        self.max_tokens = int(os.getenv("CODESCRIBE_MAX_TOKENS", "24576"))
+        self.max_tokens = int(os.getenv("CODESCRIBE_MAX_TOKENS", "32768"))
         self.last_usage = None
         env_reasoning = os.getenv("CODESCRIBE_AGENT_REASONING", "").lower() in ("1", "true", "yes")
         self.reasoning_enabled = reasoning or env_reasoning
@@ -288,11 +293,11 @@ class AnthropicModel:
         return True
 
     def chat(self, chat_template: List[Dict[str, str]]) -> str:
-        system = None
+        system_parts: List[str] = []
         messages = []
         for msg in chat_template:
             if msg["role"] == "system":
-                system = msg["content"]
+                system_parts.append(msg["content"])
             else:
                 messages.append({"role": msg["role"], "content": msg["content"]})
 
@@ -301,8 +306,14 @@ class AnthropicModel:
             "max_tokens": self.max_tokens,
             "messages": messages,
         }
-        if system:
-            kwargs["system"] = system
+        if system_parts:
+            if self.prompt_caching:
+                # Cache only the first (static) system block; later blocks are dynamic.
+                blocks = [{"type": "text", "text": system_parts[0], "cache_control": {"type": "ephemeral"}}]
+                blocks += [{"type": "text", "text": p} for p in system_parts[1:]]
+                kwargs["system"] = blocks
+            else:
+                kwargs["system"] = "\n\n".join(system_parts)
 
         # Newer anthropic-sdk-python versions require streaming for long requests
         # (server-side enforcement for operations that may exceed ~10 minutes).
@@ -319,42 +330,77 @@ class AnthropicModel:
             return ""
 
         text_parts: List[str] = []
-        final_message = None
+        start_usage = None
+        delta_output_tokens = 0
         with stream as s:
             for event in s:
-                # Collect text deltas.
-                if getattr(event, "type", None) == "content_block_delta":
+                et = getattr(event, "type", None)
+                if et == "message_start":
+                    msg = getattr(event, "message", None)
+                    if msg is not None:
+                        start_usage = getattr(msg, "usage", None)
+                elif et == "message_delta":
+                    du = getattr(event, "usage", None)
+                    if du is not None:
+                        delta_output_tokens = int(getattr(du, "output_tokens", 0) or 0)
+                elif et == "content_block_delta":
                     delta = getattr(event, "delta", None)
                     if getattr(delta, "type", None) == "text_delta":
                         text_parts.append(getattr(delta, "text", "") or "")
-                # Keep a handle to the final message so we can extract usage.
-                if getattr(event, "type", None) == "message_stop":
-                    final_message = getattr(event, "message", None)
 
-        self.last_usage = _normalize_anthropic_usage(
-            getattr(final_message, "usage", None) if final_message is not None else None
-        )
+        self.last_usage = _merge_stream_usage(start_usage, delta_output_tokens)
         return "".join(text_parts)
 
     def chat_with_tools(
         self, chat_template: List[Dict[str, Any]], tools: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        system = None
-        messages = []
+        system_parts: List[str] = []
+        messages: List[Dict[str, Any]] = []
         for msg in chat_template:
             if msg["role"] == "system":
-                system = msg["content"]
+                system_parts.append(msg["content"])
             else:
                 messages.append(msg)
+
+        anthropic_tools = [_openai_tool_to_anthropic_tool(tool) for tool in tools]
+        if self.prompt_caching and anthropic_tools:
+            anthropic_tools[-1] = {**anthropic_tools[-1], "cache_control": {"type": "ephemeral"}}
+
+        # Add a cache breakpoint on the penultimate user message so the growing
+        # tool-call / tool-result history is served from cache on each iteration.
+        if self.prompt_caching and len(messages) >= 2:
+            n_user = 0
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i]["role"] == "user":
+                    n_user += 1
+                    if n_user == 2:
+                        m = messages[i]
+                        c = m.get("content", "")
+                        if isinstance(c, str):
+                            # Convert to block format so cache_control can be attached.
+                            messages[i] = dict(m, content=[{"type": "text", "text": c, "cache_control": {"type": "ephemeral"}}])
+                        elif isinstance(c, list) and c:
+                            last = c[-1]
+                            if isinstance(last, dict) and "cache_control" not in last:
+                                new_c = c[:-1] + [{**last, "cache_control": {"type": "ephemeral"}}]
+                                messages[i] = dict(m, content=new_c)
+                        break
 
         kwargs = {
             "model": self.model,
             "max_tokens": self.max_tokens,
             "messages": messages,
-            "tools": [_openai_tool_to_anthropic_tool(tool) for tool in tools],
+            "tools": anthropic_tools,
         }
-        if system:
-            kwargs["system"] = system
+        if system_parts:
+            if self.prompt_caching:
+                # Cache only the first (static) block; subsequent blocks (e.g. WORKSPACE
+                # CONTEXT) are now in user messages, so system_parts should have length 1.
+                blocks = [{"type": "text", "text": system_parts[0], "cache_control": {"type": "ephemeral"}}]
+                blocks += [{"type": "text", "text": p} for p in system_parts[1:]]
+                kwargs["system"] = blocks
+            else:
+                kwargs["system"] = "\n\n".join(system_parts)
         if self.reasoning_enabled:
             kwargs["thinking"] = {"type": "adaptive"}
 
@@ -371,27 +417,32 @@ class AnthropicModel:
         text_parts: List[str] = []
         tool_calls: List[Dict[str, Any]] = []
         final_message = None
+        start_usage = None
+        delta_output_tokens = 0
 
         with stream as s:
             for event in s:
                 et = getattr(event, "type", None)
-
-                if et == "content_block_delta":
+                if et == "message_start":
+                    msg = getattr(event, "message", None)
+                    if msg is not None:
+                        start_usage = getattr(msg, "usage", None)
+                elif et == "message_delta":
+                    du = getattr(event, "usage", None)
+                    if du is not None:
+                        delta_output_tokens = int(getattr(du, "output_tokens", 0) or 0)
+                elif et == "content_block_delta":
                     delta = getattr(event, "delta", None)
                     if getattr(delta, "type", None) == "text_delta":
                         text_parts.append(getattr(delta, "text", "") or "")
-                    elif getattr(delta, "type", None) == "input_json_delta":
-                        # Tool use input JSON arrives as deltas; the SDK also emits a
-                        # full "tool_use" block in message_stop.final_message. We
-                        # ignore these deltas and rely on the final message parse.
-                        pass
+            try:
+                final_message = s.get_final_message()
+            except Exception:
+                pass
 
-                if et == "message_stop":
-                    final_message = getattr(event, "message", None)
-
-        usage = _normalize_anthropic_usage(
-            getattr(final_message, "usage", None) if final_message is not None else None
-        )
+        # Use event-captured usage (reliable even with extended thinking);
+        # get_final_message() is still attempted for content extraction.
+        usage = _merge_stream_usage(start_usage, delta_output_tokens)
         self.last_usage = usage
 
         # Normalize tool calls from the final message content.
@@ -400,8 +451,6 @@ class AnthropicModel:
             return {"text": "".join(text_parts), "tool_calls": [], "usage": usage}
 
         normalized = _normalize_anthropic_tool_response(response, usage)
-        # If the normalizer didn't include text (because it focuses on tool calls),
-        # use the streamed text as a fallback.
         if not normalized.get("text"):
             normalized["text"] = "".join(text_parts)
         return normalized
@@ -622,11 +671,41 @@ def _normalize_openai_usage(usage: Any) -> Any:
     if rt is not None:
         normalized["reasoning_tokens"] = int(rt)
 
+    # OpenAI automatic prompt caching: cached_tokens lives under prompt_tokens_details.
+    pt_details = getattr(usage, "prompt_tokens_details", None)
+    ct = getattr(pt_details, "cached_tokens", None) if pt_details is not None else None
+    if ct is None:
+        ct = getattr(usage, "cached_tokens", None)
+    if ct is not None:
+        normalized["cache_read_input_tokens"] = int(ct)
+
     if not normalized and hasattr(usage, "model_dump"):
         return usage.model_dump()
     if not normalized and hasattr(usage, "dict"):
         return usage.dict()
     return normalized or None
+
+
+def _merge_stream_usage(start_usage: Any, delta_output_tokens: int) -> Optional[Dict[str, Any]]:
+    """Build a normalized usage dict from Anthropic streaming event data.
+
+    message_start carries input_tokens + cache fields; message_delta carries
+    output_tokens. Combining them avoids depending on get_final_message(), which
+    can fail when extended thinking blocks are present.
+    """
+    result: Dict[str, Any] = {}
+    if start_usage is not None:
+        for key in (
+            "input_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+        ):
+            val = getattr(start_usage, key, None)
+            if isinstance(val, int):
+                result[key] = val
+    if delta_output_tokens:
+        result["output_tokens"] = delta_output_tokens
+    return result or None
 
 
 def _openai_tool_to_anthropic_tool(tool: Dict[str, Any]) -> Dict[str, Any]:
