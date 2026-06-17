@@ -402,7 +402,11 @@ class AnthropicModel:
             else:
                 kwargs["system"] = "\n\n".join(system_parts)
         if self.reasoning_enabled:
-            kwargs["thinking"] = {"type": "adaptive"}
+            # display defaults to "summarized" on Opus 4.6 but "omitted" on Opus
+            # 4.7/4.8 and Fable 5 — omitted returns thinking blocks with empty
+            # text, so reasoning looks broken on newer models. Opt in explicitly
+            # so the readable summary comes back on every model.
+            kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
 
         # Prefer streaming for long requests; accumulate events and normalize into
         # the same {text, tool_calls, usage} shape as non-streaming.

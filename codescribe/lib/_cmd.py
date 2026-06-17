@@ -174,7 +174,7 @@ def prompt_inspect(
         show_diagnostics=verbose,
     )
     result = coding_agent.run(task, system=system)
-    print(result)
+    print(result.final_text or str(result))
 
 
 def prompt_generate(
@@ -386,4 +386,4 @@ def prompt_agent(
         show_diagnostics=verbose,
         logging=logfile,
     )
-    return coding_agent.run(task)
+    return str(coding_agent.run(task))
