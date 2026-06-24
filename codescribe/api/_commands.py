@@ -128,7 +128,7 @@ def loop(
     task_file: Path,
     model: Union[Path, str],
     agent_loops: int = 5,
-    agent_iterations: int = 12,
+    agent_iterations: int = 30,
     verbose: bool = False,
     logging: Union[Path, str, None] = None,
     workdir: Union[Path, None] = None,

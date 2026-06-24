@@ -356,7 +356,7 @@ def agent(
 @click.option(
     "--agent-iterations",
     "-niter",
-    default=12,
+    default=30,
     show_default=True,
     help="Maximum tool-call iterations per agent session",
 )

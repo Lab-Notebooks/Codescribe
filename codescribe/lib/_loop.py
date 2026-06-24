@@ -5,8 +5,8 @@ Prompt-loop implementation with in-memory cross-loop state.
 State relay design:
   - Within a loop (iteration → iteration): message history + WORKSPACE CONTEXT block.
   - Across loops (loop N → loop N+1): Python objects held in prompt_loop().
-    The harness computes LoopSummary from the TOML event log after each execution
-    and injects it directly into the next loop's task string.
+    The harness builds LoopSummary from the agent's structured RunResult after
+    each execution and injects it directly into the next loop's task string.
     Agents never read state files to orient themselves.
 
 Persistent files (for inspection / crash-resume only):
@@ -122,70 +122,65 @@ class LoopSummary:
     files_read: List[str] = field(default_factory=list)
     commands_run: List[str] = field(default_factory=list)   # "cmd → exit_code N"
     errors: List[str] = field(default_factory=list)
+    rejected: List[str] = field(default_factory=list)        # "tool(args): reason" — attempted, never executed
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
 
 
-def _compute_loop_summary(loop_index: int, events: List[Dict[str, Any]]) -> LoopSummary:
-    """Build a LoopSummary from TOML event log entries."""
+def _loop_summary_from_result(loop_index: int, result: "lib.RunResult") -> LoopSummary:
+    """Build a LoopSummary directly from an Agent RunResult.
 
-    # Collect args previews keyed by tool_start order within each iteration.
-    # Map: iteration → list of (tool, args_preview) in call order.
-    starts: Dict[int, List[tuple]] = {}
-    for ev in events:
-        if ev.get("event") != "tool_start":
-            continue
-        it = ev.get("iteration")
-        if not isinstance(it, int):
-            continue
-        tool = ev.get("tool") or "?"
-        args = ev.get("args") or {}
-        if isinstance(args, dict):
-            if tool == "bash":
-                ap = (args.get("command") or "").replace("\n", " ").strip()[:80]
-            elif tool in ("read", "write"):
-                ap = str(args.get("path", ""))
-            elif tool == "edit":
-                ap = str(args.get("path", ""))
-            else:
-                ap = ""
-        else:
-            ap = str(args)[:60]
-        starts.setdefault(it, []).append((tool, ap))
-
-    # Consume starts queue as we process tool_end events.
-    starts_q: Dict[int, List[tuple]] = {k: list(v) for k, v in starts.items()}
+    This consumes the structured result the agent returns rather than re-parsing
+    the TOML event log, so the loop no longer couples to the event-log schema.
+    """
 
     summary = LoopSummary(loop_index=loop_index)
 
-    for ev in events:
-        if ev.get("event") == "tool_end":
-            it = ev.get("iteration")
-            tool = ev.get("tool") or "?"
-            preview = (ev.get("output_preview") or "").strip()
-            output_is_error = preview.startswith("Error:")
-            ok = ev.get("ok") and not output_is_error
-
+    for tr in result.tool_results:
+        tool = tr.name or "?"
+        args = tr.args if isinstance(tr.args, dict) else {}
+        if tool == "bash":
+            ap = (args.get("command") or "").replace("\n", " ").strip()[:80]
+        elif tool in ("read", "write", "edit"):
+            ap = str(args.get("path", ""))
+        else:
             ap = ""
-            if isinstance(it, int) and starts_q.get(it):
-                _, ap = starts_q[it].pop(0)
 
-            if not ok:
-                err_msg = preview[:80] if preview else (ev.get("error") or "unknown error")
-                summary.errors.append(f"{tool}({ap}): {err_msg}")
-            elif tool == "write":
-                summary.files_written.append(ap)
-            elif tool == "edit":
-                summary.files_edited.append(ap)
-            elif tool == "read":
-                summary.files_read.append(ap)
-            elif tool == "bash":
-                first = (preview.splitlines() or [""])[0][:60]
-                summary.commands_run.append(f"{ap}  →  {first}")
+        preview = (tr.output_preview or "").strip()
 
-        elif ev.get("event") == "run_end":
-            summary.total_input_tokens = int(ev.get("total_input_tokens") or 0)
-            summary.total_output_tokens = int(ev.get("total_output_tokens") or 0)
+        if not tr.ok:
+            err_msg = preview[:80] if preview else "unknown error"
+            summary.errors.append(f"{tool}({ap}): {err_msg}")
+        elif tool == "write":
+            summary.files_written.append(ap)
+        elif tool == "edit":
+            summary.files_edited.append(ap)
+        elif tool == "read":
+            summary.files_read.append(ap)
+        elif tool == "bash":
+            first = (preview.splitlines() or [""])[0][:60]
+            summary.commands_run.append(f"{ap}  →  {first}")
+
+    # Calls the agent attempted but the harness refused — never reached the
+    # workspace, so they are tracked separately from verified actions/errors.
+    for rc in result.rejected_calls:
+        tool = rc.name or "?"
+        args = rc.args if isinstance(rc.args, dict) else {}
+        if tool == "bash":
+            ap = (args.get("command") or "").replace("\n", " ").strip()[:80]
+        elif tool in ("read", "write", "edit"):
+            ap = str(args.get("path", ""))
+        else:
+            ap = ""
+        summary.rejected.append(f"{tool}({ap}): {rc.reason}")
+
+    u = result.usage
+    summary.total_input_tokens = u.input
+    summary.total_output_tokens = u.output
+    summary.total_cache_creation_tokens = u.cache_write
+    summary.total_cache_read_tokens = u.cache_read
 
     return summary
 
@@ -196,15 +191,22 @@ def _compute_loop_summary(loop_index: int, events: List[Dict[str, Any]]) -> Loop
 
 def build_system_prompt(*, workdir: Path) -> str:
     return (
-        "You are an autonomous coding agent specializing in test-driven repair. "
-        "NEVER fabricate command results, test output, or file contents — "
-        "if you need information, read a file or run a command and report verbatim output. "
-        "Determine project state by reading files and running commands; never assume or infer. "
-        "IMPORTANT: Only access files and paths within the working directory. "
-        "In bash commands, only use relative paths or paths under the working directory. "
-        "Never target system directories or paths outside the working directory. "
-        "Avoid unnecessary file re-reads, but re-read whenever you need exact text, "
-        "line context, or verification before/after edits."
+        "You are an autonomous coding agent specializing in test-driven development and repair.\n\n"
+        "Core rules:\n"
+        "- NEVER fabricate command results, test output, or file contents — always call a tool.\n"
+        "- Determine project state by reading files and running commands; never assume or infer.\n"
+        "- Only access files and paths within the working directory; never target system directories.\n"
+        "- In bash commands, only use relative paths or paths under the working directory.\n\n"
+        "Efficiency rules (critical for speed):\n"
+        "- Batch ALL independent reads and globs into the first turn — fetch everything you need before acting.\n"
+        "- Once you have identified the changes needed, implement them immediately without further exploration.\n"
+        "- Do not re-read files you have already read unless they were modified since your last read.\n"
+        "- Prefer a single comprehensive edit over multiple small edits to the same file.\n"
+        "- Run tests after each meaningful code change — do not defer validation to the end.\n"
+        "- When all tests pass and all pending items are resolved, stop immediately — do not invent further work.\n\n"
+        "Tool guidance:\n"
+        "- Use glob to discover structure, read for content, bash for running commands and tests.\n"
+        "- Use edit for targeted changes; use write only when creating new files or doing full rewrites.\n"
     )
 
 
@@ -267,6 +269,7 @@ def build_execution_task(
     *,
     workdir: Path,
     task_rel: str,
+    task_content: str = "",
     loop_idx: int,
     agent_loops: int,
     loop_summaries: List[LoopSummary],
@@ -278,10 +281,13 @@ def build_execution_task(
         loop_summaries=loop_summaries,
         pending_items=pending_items,
     )
-    # In the first loop, direct the agent to read the task file.  In subsequent
-    # loops the spec is already in the chat history and the file inventory above
-    # describes all work done — re-reading wastes 2-3 iterations per loop.
-    if loop_idx == 1:
+    if loop_idx == 1 and task_content:
+        # Pre-inject the spec so the agent skips the read-to-orient round-trip.
+        orient_step = (
+            "1. The full task specification is provided below — do NOT re-read the task file.\n\n"
+            f"<task_specification>\n{task_content}\n</task_specification>\n"
+        )
+    elif loop_idx == 1:
         orient_step = "1. Read the task file to orient yourself on the specification.\n"
     else:
         orient_step = (
@@ -293,20 +299,27 @@ def build_execution_task(
         f"Working directory: {workdir}\n"
         f"Task file: {task_rel} (read-only — contains the full specification)\n\n"
         "PHASE: EXECUTION\n\n"
-        "Goal: make the most useful concrete progress on the task.\n\n"
+        "Goal: COMPLETE the task in this single session if at all possible. Implement every\n"
+        "remaining item you can, verify it, and only stop when the task is fully done or you\n"
+        "are genuinely blocked. Do NOT implement just one item and defer the rest to a later\n"
+        "loop — keep working until everything that can be done this session is done.\n\n"
         "Protocol:\n"
         + orient_step +
-        "2. Write a short PLAN (3–7 bullets) covering what you will do next.\n"
-        "3. Execute the plan autonomously — do NOT ask for confirmation.\n"
+        "2. Write a short PLAN (3–7 bullets) covering everything you intend to complete now.\n"
+        "3. Execute the plan autonomously and to completion — do NOT ask for confirmation, and\n"
+        "   do NOT stop after a single change while more work remains.\n"
         "4. Before each set of tool calls, write one or two sentences stating what you are about to do and why.\n"
         "5. Inspect the current state of relevant files before editing them.\n"
-        "6. Do the work described in the pending next steps (or the highest-value action if none are listed).\n"
-        "7. Run the closest available check (tests, lint, typecheck). If none, run `python -m compileall .`.\n\n"
-        "Finish with <final_answer> that includes:\n"
+        "6. After each meaningful change, run the closest available check (tests, lint, typecheck).\n"
+        "   If none exists, run `python -m compileall .`. Do not defer all validation to the end.\n"
+        "7. Continue until every task is implemented AND the checks pass, or you hit a hard blocker.\n\n"
+        "Finish with <final_answer> that includes, in this order:\n"
+        "- A status line of the EXACT form `STATUS: COMPLETE` if every task is implemented and all\n"
+        "  checks pass, otherwise `STATUS: INCOMPLETE`.\n"
         "- The PLAN you followed (final form).\n"
-        "- Exact output of every command you ran (verbatim, not paraphrased).\n"
-        "- A bulleted list of NEXT STEPS (3-5 concrete items) for the following loop.\n"
-        "  Begin that section with the exact line: NEXT STEPS:\n"
+        "- Exact output of the checks you ran (verbatim, not paraphrased).\n"
+        "- ONLY when STATUS is INCOMPLETE: a bulleted list of NEXT STEPS (3-5 concrete items) for\n"
+        "  the following loop, beginning with the exact line: NEXT STEPS:\n"
     )
 
 
@@ -341,12 +354,25 @@ def build_review_task(
         summary_lines.append("  (no verified actions)")
     verified_block = "\n".join(summary_lines)
 
+    # Calls the agent attempted but the harness refused to run. These did NOT
+    # touch the workspace, so any execution-report claim that depends on one of
+    # them is unverified and must be flagged.
+    rejected_block = ""
+    if loop_summary.rejected:
+        rejected_lines = [
+            "## Attempted but NOT executed (harness-rejected — no workspace effect)"
+        ]
+        for r in loop_summary.rejected:
+            rejected_lines.append(f"  {r}")
+        rejected_block = "\n".join(rejected_lines)
+
     return (
         f"Working directory: {workdir}\n"
         f"Task file: {task_rel} (read-only)\n"
         f"Review output: {review_output_rel} (write here)\n\n"
         "PHASE: REVIEW\n\n"
         f"{verified_block}\n\n"
+        + (f"{rejected_block}\n\n" if rejected_block else "")
         + (
             f"\n[Execution agent report — loop {loop_index}]\n\n{exec_answer}\n\n"
             if exec_answer else ""
@@ -355,6 +381,8 @@ def build_review_task(
         "1. Cross-reference the execution report's claims against the verified actions above.\n"
         "   File reads listed above are verified — treat the agent's claims about those\n"
         "   files as trustworthy. Only flag claims about files NOT in the verified list.\n"
+        "   Any claim that relies on an 'Attempted but NOT executed' call did NOT actually\n"
+        "   happen — flag it as unverified and carry the underlying work into pending items.\n"
         "2. Write your assessment to the review output file in TOML format:\n\n"
         "   ```toml\n"
         f"   loop = {loop_index}\n"
@@ -408,6 +436,36 @@ def _extract_pending_items(final_text: str) -> List[str]:
     return items[:5]
 
 
+def _extract_status(final_text: str) -> Optional[str]:
+    """Parse a `STATUS: COMPLETE` / `STATUS: INCOMPLETE` line from a final answer.
+
+    Returns "COMPLETE", "INCOMPLETE", or None if no status line was emitted.
+    """
+    for line in (final_text or "").splitlines():
+        s = line.strip().upper()
+        if s.startswith("STATUS:"):
+            val = s[len("STATUS:"):].strip()
+            if val.startswith("COMPLETE"):
+                return "COMPLETE"
+            if val.startswith("INCOMPLETE"):
+                return "INCOMPLETE"
+    return None
+
+
+def _update_cumulative_tokens(
+    run_toml_data: Dict[str, Any], summaries: List[LoopSummary]
+) -> None:
+    """Roll up per-loop token totals into the run.toml record (in place)."""
+    run_toml_data["cumulative_input_tokens"] = sum(s.total_input_tokens for s in summaries)
+    run_toml_data["cumulative_output_tokens"] = sum(s.total_output_tokens for s in summaries)
+    run_toml_data["cumulative_cache_creation_tokens"] = sum(
+        s.total_cache_creation_tokens for s in summaries
+    )
+    run_toml_data["cumulative_cache_read_tokens"] = sum(
+        s.total_cache_read_tokens for s in summaries
+    )
+
+
 def _read_review_output(path: Path) -> Dict[str, Any]:
     """Read the review agent's structured TOML output."""
     data = lib.read_toml(path)
@@ -418,7 +476,7 @@ def prompt_loop(
     task_file: Union[Path, str],
     model: Union[Path, str],
     agent_loops: int = 5,
-    agent_iterations: int = 12,
+    agent_iterations: int = 30,
     verbose: bool = False,
     logging: Optional[Union[Path, str]] = None,
     workdir: Optional[Union[Path, str]] = None,
@@ -431,7 +489,8 @@ def prompt_loop(
     state or history files to orient themselves.
 
     Per loop:
-      1) EXECUTION agent: reads task file + does work + reports NEXT STEPS.
+      1) EXECUTION agent: reads task file + does work + reports STATUS + NEXT STEPS.
+         If it reports STATUS: COMPLETE, the loop exits early (review skipped).
       2) REVIEW agent: receives harness-computed action summary + writes review_output.toml.
 
     Persistent files under `.codescribe/loop/` (for inspection / crash-resume):
@@ -467,6 +526,8 @@ def prompt_loop(
         "agent_iterations": int(agent_iterations),
         "cumulative_input_tokens": 0,
         "cumulative_output_tokens": 0,
+        "cumulative_cache_creation_tokens": 0,
+        "cumulative_cache_read_tokens": 0,
         "loops_completed": 0,
     }
     lib.atomic_write_toml(paths.run_toml, run_toml_data)
@@ -525,33 +586,54 @@ def prompt_loop(
             logging=exec_log,
         )
 
+        task_content = ""
+        if loop_idx == 1:
+            try:
+                task_content = (workdir_path / task_rel).read_text(errors="replace")
+            except OSError:
+                pass
+
         exec_task = build_execution_task(
             workdir=workdir_path,
             task_rel=task_rel,
+            task_content=task_content,
             loop_idx=loop_idx,
             agent_loops=agent_loops,
             loop_summaries=loop_summaries,
             pending_items=pending_items,
         )
 
-        exec_answer = exec_agent.run(exec_task, system=system, chat_history=chat_history)
+        exec_result = exec_agent.run(exec_task, system=system, chat_history=chat_history)
+        exec_answer = exec_result.final_text or ""
 
-        # Compute the loop summary from the TOML event log (deterministic — no LLM).
-        events = lib.read_toml_events(paths.execution_toml)
-        loop_summary = _compute_loop_summary(loop_idx, events)
+        # Build the loop summary directly from the agent's structured result
+        # (deterministic — no LLM, no event-log re-parse).
+        loop_summary = _loop_summary_from_result(loop_idx, exec_result)
         loop_summaries.append(loop_summary)
 
         # Optimistically extract NEXT STEPS from the final answer so the review
         # agent has a starting point even if it can't improve on them.
-        pending_items = _extract_pending_items(exec_answer or "")
+        status = _extract_status(exec_answer)
+        pending_items = _extract_pending_items(exec_answer)
 
         # Update run.toml with cumulative token usage after each execution phase.
-        run_toml_data["cumulative_input_tokens"] = sum(s.total_input_tokens for s in loop_summaries) + sum(s.total_input_tokens for s in review_summaries)
-        run_toml_data["cumulative_output_tokens"] = sum(s.total_output_tokens for s in loop_summaries) + sum(s.total_output_tokens for s in review_summaries)
+        _update_cumulative_tokens(run_toml_data, loop_summaries + review_summaries)
         run_toml_data["loops_completed"] = loop_idx
         lib.atomic_write_toml(paths.run_toml, run_toml_data)
 
         loops_completed = loop_idx
+
+        # Early exit: the execution agent self-reported completion (all tasks done
+        # and checks passing). Trust it and skip the review pass — this is what
+        # lets a fully-solvable task finish in a single loop.
+        if status == "COMPLETE":
+            if verbose:
+                print(
+                    f"\n✓ execution agent reported STATUS: COMPLETE after loop {loop_idx} "
+                    "— task complete, stopping early."
+                )
+            pending_items = []
+            break
 
         # ----------------------
         # Phase 2: REVIEW
@@ -583,12 +665,10 @@ def prompt_loop(
             exec_answer=exec_answer or "",
         )
 
-        _ = review_agent.run(review_task, system=system)
+        review_result = review_agent.run(review_task, system=system)
 
-        review_events = lib.read_toml_events(paths.run_dir / "review.toml")
-        review_summaries.append(_compute_loop_summary(loop_idx, review_events))
-        run_toml_data["cumulative_input_tokens"] = sum(s.total_input_tokens for s in loop_summaries) + sum(s.total_input_tokens for s in review_summaries)
-        run_toml_data["cumulative_output_tokens"] = sum(s.total_output_tokens for s in loop_summaries) + sum(s.total_output_tokens for s in review_summaries)
+        review_summaries.append(_loop_summary_from_result(loop_idx, review_result))
+        _update_cumulative_tokens(run_toml_data, loop_summaries + review_summaries)
         lib.atomic_write_toml(paths.run_toml, run_toml_data)
 
         # Read the review agent's structured output and update in-memory state.
