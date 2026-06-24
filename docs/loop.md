@@ -44,21 +44,29 @@ The harness injects these summaries back into later prompts.
 
 ## Persistent artifacts
 
-The loop also writes files under `.codescribe/loop/`:
+The loop writes artifacts under `.codescribe/loop/`:
 
 - `run.toml`
-  - run metadata and cumulative token counters
+  - run metadata
+  - configured model and limits
+  - cumulative token counters
+  - `loops_completed`
 - `state.toml`
   - current `run_id`, `loop_index`, and `phase`
+  - `workdir`
+  - `task_file`
+  - `updated_at`
 - `execution.toml`
   - execution-phase event log for the most recent loop
+  - overwritten at the start of each execution phase
 - `review_output.toml`
   - structured output from the review agent
+  - overwritten on each review phase
 - `review.toml`
   - review-phase event log
 
-These files are useful for inspection and recovery, but the main state relay is
-still in memory.
+These files are useful for inspection and crash recovery, but the main state
+relay is still in memory.
 
 ## Task loading and tool configuration
 
@@ -67,6 +75,7 @@ still in memory.
 - resolves `workdir`,
 - ensures the task file is inside the workdir,
 - constructs the model with `set_neural_model(..., reasoning=reason)`,
+- builds the loop system prompt with `build_system_prompt(...)`,
 - loads the task chat template with `load_chat_template(..., return_meta=True)`,
 - reads optional task metadata:
 
@@ -77,12 +86,28 @@ bash = ["rg", "python", "python3"]
 
 That `bash` list extends the bounded execution-phase bash allowlist.
 
+## System prompt
+
+`build_system_prompt(...)` gives both loop phases a shared policy prompt.
+
+It emphasizes:
+
+- never fabricating file contents, command output, or test results,
+- determining state by tools rather than assumption,
+- staying inside the working directory,
+- using relative or workdir-contained paths in bash,
+- batching independent reads early,
+- preferring direct implementation over repeated exploration,
+- validating after meaningful changes,
+- using `edit` for targeted changes and `write` for new files or rewrites.
+
 ## Execution phase
 
 The execution phase uses:
 
 - `Agent(...)`
 - `tools = make_tools(workdir, bash_allow=...)`
+- `max_iterations = agent_iterations`
 - logging to `.codescribe/loop/execution.toml`
 
 If `--log` or `--log-path` is also provided, logs are fanned out through
@@ -93,9 +118,14 @@ If `--log` or `--log-path` is also provided, logs are fanned out through
 `build_execution_task(...)` injects:
 
 - loop progress,
-- files created/edited in prior loops,
-- recent commands and errors,
+- files created across prior loops,
+- files edited across prior loops,
+- recent commands and errors from the last loop,
 - pending items.
+
+That context is assembled by `format_loop_context(...)`, which is how the
+harness keeps the next execution session oriented without requiring the agent to
+re-read state files.
 
 Behavior differs slightly on the first loop:
 
@@ -144,6 +174,10 @@ The review bash allowlist is tighter than execution:
 - `env`
 - `rg`
 
+The review agent iteration budget is:
+
+- `max(6, agent_iterations // 2)`
+
 Important correction:
 
 - The review phase is not limited to only `read/glob/write`; it also has a
@@ -157,6 +191,10 @@ Important correction:
 - any rejected tool calls,
 - the execution agent’s final report,
 - the path where it must write `review_output.toml`.
+
+Rejected calls are important: they were attempted by the execution agent but the
+harness refused to run them, so they had no workspace effect and should be
+considered unverified.
 
 ### Review output format
 
@@ -188,7 +226,10 @@ It tracks:
 - `rejected`
 - token counts
 
-This means the loop depends directly on `Agent.run()` output semantics.
+Important correction:
+
+- Although older comments may refer to the TOML event log, the current summary
+  logic is driven by `Agent.run()` output semantics.
 
 ## Early exit conditions
 
@@ -219,5 +260,12 @@ This is a policy layer, not an OS sandbox.
 - `agent_loops = 5`
 - `agent_iterations = 30`
 
-Those defaults differ from some older docs that mentioned smaller iteration
-budgets.
+## CLI note
+
+The loop implementation and CLI option defaults agree on the current limits.
+
+However, the command help text in `codescribe/cli/_commands.py` still contains
+older wording that says each loop picks the single most important next task and
+exits. That description is stale relative to the current execution prompt in
+`codescribe/lib/_loop.py`, which instructs the agent to complete as much work as
+possible in one session.

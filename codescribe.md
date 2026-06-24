@@ -300,7 +300,7 @@ code-scribe translate <filelist> -m anthropic-claude-opus-4-8 -p seed_prompt.tom
 code-scribe inspect README.rst -m oaic-llama3.1 -q "Summarize this repo and list key entry points."
 ```
 
-Key flags for `agent`/`loop`: `--verbose/-v` (stream per-iteration tool calls and token usage), `--log`/`--log-path PATH` (write TOML diagnostics), `--reason` (adaptive thinking on Anthropic backends; silently ignored elsewhere). Loop adds `--workdir DIR`, `--agent-loops/-nloop N` (default 5), and `--agent-iterations/-niter N` (default 12).
+Key flags for `agent`/`loop`: `--verbose/-v` (stream per-iteration tool calls and token usage), `--log`/`--log-path PATH` (write TOML diagnostics), `--reason` (adaptive thinking on Anthropic backends; silently ignored elsewhere). Loop adds `--workdir DIR`, `--agent-loops/-nloop N` (default 5), and `--agent-iterations/-niter N` (default 30).
 
 # Limitations
 

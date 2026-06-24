@@ -297,9 +297,9 @@ Following is a brief overview of different commands:
 
 #. ``code-scribe loop <task_file> -m <model_name_or_path>``: Run a
    repeated bounded loop in which each session starts fresh, reads the
-   task file, performs exactly one important pending task, writes a
-   concise report, and exits. Loop status is written under
-   ``.codescribe/loop/``.
+   task file, attempts to complete as much remaining work as possible in
+   that session, and then runs review when needed. Loop status is
+   written under ``.codescribe/loop/``.
 
    Key flags:
 
@@ -307,7 +307,7 @@ Following is a brief overview of different commands:
    -  ``--agent-loops`` / ``-nloop N``: number of execution → review
       cycles (default 5).
    -  ``--agent-iterations`` / ``-niter N``: tool-call budget per cycle
-      (default 12).
+      (default 30).
    -  ``--reason``: enable adaptive thinking (Anthropic models only;
       silently ignored for all other backends).
 

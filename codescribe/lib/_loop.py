@@ -145,19 +145,33 @@ class PromptLoopRunner:
         self.task_path = ensure_within_workdir(Path(self.task_file), self.workdir_path)
         self.neural_model = lib.set_neural_model(self.model, reasoning=self.reason)  # type: ignore[attr-defined]
 
-        self.chat_history, meta = lib.load_chat_template(self.task_path, return_meta=True)
-        bash_allow = set((meta.get("tools") or {}).get("bash") or [])
-        self.tools = lib.make_tools(self.workdir_path, bash_allow=bash_allow)
-
         self.run_id = lib.new_run_id()
         self.paths = get_loop_paths(self.workdir_path)
-        os.makedirs(self.paths.run_dir, exist_ok=True)
-
         self.task_rel = str(self.task_path.relative_to(self.workdir_path))
         self.review_output_rel = str(self.paths.review_output_toml.relative_to(self.workdir_path))
         self.system = build_system_prompt(workdir=self.workdir_path)
 
-        self.run_toml_data: Dict[str, Any] = {
+        self.loop_summaries: List[LoopSummary] = []
+        self.review_summaries: List[LoopSummary] = []
+        self.pending_items: List[str] = []
+        self.loops_completed = 0
+        self.task_mtime: float = 0.0
+
+        self.load_task_context()
+        self.initialize_paths()
+        self.initialize_run_record()
+        self.initialize_loop_state()
+
+    def load_task_context(self) -> None:
+        self.chat_history, meta = lib.load_chat_template(self.task_path, return_meta=True)
+        bash_allow = set((meta.get("tools") or {}).get("bash") or [])
+        self.tools = lib.make_tools(self.workdir_path, bash_allow=bash_allow)
+
+    def initialize_paths(self) -> None:
+        os.makedirs(self.paths.run_dir, exist_ok=True)
+
+    def initialize_run_record(self) -> None:
+        self.run_toml_data = {
             "run_id": self.run_id,
             "created_at": lib.iso_utc_now(),
             "workdir": str(self.workdir_path),
@@ -173,14 +187,15 @@ class PromptLoopRunner:
         }
         lib.atomic_write_toml(self.paths.run_toml, self.run_toml_data)
 
+    def initialize_loop_state(self) -> None:
         self.state = init_state(run_id=self.run_id, workdir=self.workdir_path, task_file=self.task_path)
         write_state(self.paths.state_toml, self.state)
 
-        self.loop_summaries: List[LoopSummary] = []
-        self.review_summaries: List[LoopSummary] = []
-        self.pending_items: List[str] = []
-        self.loops_completed = 0
-        self.task_mtime: float = 0.0
+    def update_state(self, *, loop_index: int, phase: str) -> None:
+        self.state["run_id"] = self.run_id
+        self.state["loop_index"] = loop_index
+        self.state["phase"] = phase
+        write_state(self.paths.state_toml, self.state)
 
     def reload_task_context_if_needed(self) -> None:
         try:
@@ -188,9 +203,7 @@ class PromptLoopRunner:
         except OSError:
             current_mtime = 0.0
         if current_mtime != self.task_mtime:
-            self.chat_history, meta = lib.load_chat_template(self.task_path, return_meta=True)
-            bash_allow = set((meta.get("tools") or {}).get("bash") or [])
-            self.tools = lib.make_tools(self.workdir_path, bash_allow=bash_allow)
+            self.load_task_context()
             self.task_mtime = current_mtime
 
     def persist_run_progress(self, loop_idx: int) -> None:
@@ -199,36 +212,40 @@ class PromptLoopRunner:
         lib.atomic_write_toml(self.paths.run_toml, self.run_toml_data)
         self.loops_completed = loop_idx
 
-    def run_execution_phase(self, loop_idx: int) -> tuple[LoopSummary, str, Optional[str]]:
-        if self.verbose:
-            print(f"\n▶  loop {loop_idx} [execution]")
-
-        self.state["run_id"] = self.run_id
-        self.state["loop_index"] = loop_idx
-        self.state["phase"] = "execution"
-        write_state(self.paths.state_toml, self.state)
-
-        lib.atomic_write_text(self.paths.execution_toml, "")
-
+    def build_execution_logging(self) -> lib.ToolLogSink:
         exec_log: lib.ToolLogSink = lib.ToolLogToml(path=str(self.paths.execution_toml))
         if self.logging is not None:
             extra_log = lib.ToolLogToml(path=str(self.logging) if str(self.logging) else None)
             exec_log = lib.MultiToolLogSink([exec_log, extra_log])
+        return exec_log
 
-        exec_agent = lib.Agent(
+    def build_execution_agent(self, logging: lib.ToolLogSink) -> lib.Agent:
+        return lib.Agent(
             self.neural_model,
             tools=self.tools,
             max_iterations=self.agent_iterations,
             show_diagnostics=self.verbose,
-            logging=exec_log,
+            logging=logging,
         )
 
-        task_content = ""
-        if loop_idx == 1:
-            try:
-                task_content = (self.workdir_path / self.task_rel).read_text(errors="replace")
-            except OSError:
-                pass
+    def read_initial_task_content(self, loop_idx: int) -> str:
+        if loop_idx != 1:
+            return ""
+        try:
+            return (self.workdir_path / self.task_rel).read_text(errors="replace")
+        except OSError:
+            return ""
+
+    def run_execution_phase(self, loop_idx: int) -> tuple[LoopSummary, str, Optional[str]]:
+        if self.verbose:
+            print(f"\n▶  loop {loop_idx} [execution]")
+
+        self.update_state(loop_index=loop_idx, phase="execution")
+        lib.atomic_write_text(self.paths.execution_toml, "")
+
+        exec_log = self.build_execution_logging()
+        exec_agent = self.build_execution_agent(exec_log)
+        task_content = self.read_initial_task_content(loop_idx)
 
         exec_task = build_execution_task(
             workdir=self.workdir_path,
@@ -243,28 +260,50 @@ class PromptLoopRunner:
         exec_result = exec_agent.run(exec_task, system=self.system, chat_history=self.chat_history)
         exec_answer = exec_result.final_text or ""
         loop_summary = loop_summary_from_result(loop_idx, exec_result)
+
         self.loop_summaries.append(loop_summary)
         self.pending_items = extract_pending_items(exec_answer)
         self.persist_run_progress(loop_idx)
         return loop_summary, exec_answer, extract_status(exec_answer)
 
-    def run_review_phase(self, loop_idx: int, loop_summary: LoopSummary, exec_answer: str) -> bool:
-        if self.verbose:
-            print(f"\n▶  loop {loop_idx} [review]")
-
-        self.state["phase"] = "review"
-        write_state(self.paths.state_toml, self.state)
-
+    def build_review_tools(self) -> List[lib.AgentTool]:
         review_bash_allow = {"ls", "stat", "pwd", "find", "grep", "head", "tail", "which", "env", "rg"}
         review_tools = [t for t in self.tools if t.name in ("read", "glob", "write")]
-        review_tools.append(lib.BashTool(cwd=self.workdir_path, bounded=True, allowed_commands=review_bash_allow))
-        review_agent = lib.Agent(
+        review_tools.append(
+            lib.BashTool(cwd=self.workdir_path, bounded=True, allowed_commands=review_bash_allow)
+        )
+        return review_tools
+
+    def build_review_agent(self) -> lib.Agent:
+        return lib.Agent(
             self.neural_model,
-            tools=review_tools,
+            tools=self.build_review_tools(),
             max_iterations=max(6, self.agent_iterations // 2),
             show_diagnostics=self.verbose,
             logging=lib.ToolLogToml(path=str(self.paths.run_dir / "review.toml")),
         )
+
+    def apply_review_data(self, review_data: Dict[str, Any]) -> bool:
+        raw_pending = review_data.get("pending") or []
+        if isinstance(raw_pending, list):
+            reviewed_items = [
+                p.get("item", "") if isinstance(p, dict) else str(p)
+                for p in raw_pending
+                if p
+            ]
+            self.pending_items = [x for x in reviewed_items if x]
+
+        blocker = review_data.get("blocker", "")
+        if not self.pending_items and not blocker:
+            return True
+        return False
+
+    def run_review_phase(self, loop_idx: int, loop_summary: LoopSummary, exec_answer: str) -> bool:
+        if self.verbose:
+            print(f"\n▶  loop {loop_idx} [review]")
+
+        self.update_state(loop_index=loop_idx, phase="review")
+        review_agent = self.build_review_agent()
 
         review_task = build_review_task(
             workdir=self.workdir_path,
@@ -284,17 +323,7 @@ class PromptLoopRunner:
         if not review_data:
             return False
 
-        raw_pending = review_data.get("pending") or []
-        if isinstance(raw_pending, list):
-            reviewed_items = [
-                p.get("item", "") if isinstance(p, dict) else str(p)
-                for p in raw_pending
-                if p
-            ]
-            self.pending_items = [x for x in reviewed_items if x]
-
-        blocker = review_data.get("blocker", "")
-        if not self.pending_items and not blocker:
+        if self.apply_review_data(review_data):
             if self.verbose:
                 print(
                     f"\n✓ No pending items and no blocker after loop {loop_idx} "
@@ -599,8 +628,7 @@ def build_review_task(
 
 
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# prompt_loop command
+# Runner utilities
 # ---------------------------------------------------------------------------
 
 def ensure_within_workdir(path: Path, workdir: Path) -> Path:

@@ -127,7 +127,7 @@
         "options": {
           "--workdir DIR": "Root directory the agent is bounded to (default: cwd)",
           "--agent-loops/-nloop N": "Number of execution→review cycles (default: 5)",
-          "--agent-iterations/-niter N": "Tool-call budget per cycle (default: 12)",
+          "--agent-iterations/-niter N": "Tool-call budget per cycle (default: 30)",
           "--verbose/-v": "Stream per-iteration tool calls and token usage to stdout",
           "--log": "Write TOML diagnostic events to the default path: .codescribe/logs/toolusage.toml",
           "--log-path PATH": "Write TOML diagnostic events to PATH (implies --log)",
