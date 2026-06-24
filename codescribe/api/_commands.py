@@ -1,9 +1,7 @@
-"""Command line interface for Jobrunner"""
-
-import os
+"""Public API entry points for CodeScribe commands."""
 
 from pathlib import Path
-from typing import Union, List
+from typing import List, Optional, Union
 
 from codescribe import lib
 
@@ -61,7 +59,7 @@ def inspect(
 def generate(
     seed_query_prompt: Union[Path, str],
     model: Union[Path, str],
-    reference_existing: List[Path] = [],
+    reference_existing: Optional[List[Path]] = None,
 ) -> None:
     """
     API command for generating files
@@ -69,16 +67,16 @@ def generate(
     lib.prompt_generate(
         seed_query_prompt,
         model=model,
-        reference_existing=reference_existing,
+        reference_existing=reference_existing or [],
     )
 
 
 def update(
     filelist: List[Path],
     model: Union[Path, str],
-    seed_prompt: Union[Path, None] = None,
+    seed_prompt: Optional[Path] = None,
     query_prompt: str = "",
-    reference_existing: List[Path] = [],
+    reference_existing: Optional[List[Path]] = None,
 ) -> None:
     """
     API command for updating files
@@ -91,7 +89,7 @@ def update(
         seed_prompt,
         query_prompt,
         model=model,
-        reference_existing=reference_existing,
+        reference_existing=reference_existing or [],
     )
 
 

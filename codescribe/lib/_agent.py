@@ -214,25 +214,41 @@ class ConsoleObserver(RunObserver):
             yield
 
     @staticmethod
-    def _cache_part(usage: "TokenUsage") -> str:
+    def cache_part(usage: "TokenUsage") -> str:
         if usage.cache_write or usage.cache_read:
             return f"  cache_write {usage.cache_write:,}  cache_read {usage.cache_read:,}"
         return ""
 
+    @staticmethod
+    def print_reasoning_block(text: str) -> None:
+        """Print reasoning lines prefixed with │, dimmed when stdout is a TTY."""
+        use_ansi = getattr(sys.stdout, "isatty", lambda: False)()
+        dim = "\033[2m" if use_ansi else ""
+        reset = "\033[0m" if use_ansi else ""
+        for line in (text.splitlines() or [""]):
+            print(f"    │ {dim}{line}{reset}")
+
+    @staticmethod
+    def diagnostic_result_hint(name: str, output: str) -> str:
+        """One-line hint for console diagnostics."""
+        summary, _ = summarize_tool_output(name, output)
+        first = (summary.splitlines() or ["(empty)"])[0].strip()
+        return (first[:70] + "…") if len(first) > 70 else first
+
     def on_model_response(self, *, iteration: int, usage: "TokenUsage", reasoning: str) -> None:
         if reasoning:
-            _print_reasoning_block(reasoning)
+            self.print_reasoning_block(reasoning)
         rsn_part = f"  rsn {usage.reasoning:,}" if usage.reasoning else ""
         print(
             f"    usage  in {usage.input:,}  out {usage.output:,}"
-            f"{rsn_part}{self._cache_part(usage)}  total {usage.total:,}"
+            f"{rsn_part}{self.cache_part(usage)}  total {usage.total:,}"
         )
 
     def on_tool_start(self, name: str, args_preview: str) -> None:
         print(f"    ▸ {name:<5}  {args_preview:<60}", end="", flush=True)
 
     def on_tool_end(self, name: str, output: str) -> None:
-        print(f"  {_diagnostic_result_hint(name, output)}")
+        print(f"  {self.diagnostic_result_hint(name, output)}")
 
     def on_run_end(self, result: "RunResult") -> None:
         u = result.usage
@@ -240,7 +256,7 @@ class ConsoleObserver(RunObserver):
         print()
         print(
             f"  tokens  in {u.input:,}  out {u.output:,}"
-            f"{rsn_part}{self._cache_part(u)}  total {u.total:,}"
+            f"{rsn_part}{self.cache_part(u)}  total {u.total:,}"
         )
 
 
@@ -248,64 +264,11 @@ class ConsoleObserver(RunObserver):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _count_tokens(text: str) -> int:
-    """Estimate token count from raw text (~4 chars per token)."""
-    return max(1, (len(text) + 3) // 4)
-
-
-def _count_message_tokens(messages: List[Dict[str, Any]]) -> int:
-    total = 0
-    for message in messages:
-        content = message.get("content")
-        if isinstance(content, str):
-            total += _count_tokens(content)
-        elif isinstance(content, list):
-            total += _count_tokens(json.dumps(content, ensure_ascii=False))
-    return total
-
-
-def _fmt_args(name: str, args: Dict[str, Any]) -> str:
-    """Short human-readable preview of tool arguments."""
-    if name == "bash":
-        cmd = (args.get("command") or "").replace("\n", " ").strip()
-        return (cmd[:60] + "…") if len(cmd) > 60 else cmd
-    if name in ("read", "write"):
-        return args.get("path", "")
-    if name == "edit":
-        path = args.get("path", "")
-        n = len(args.get("edits") or [])
-        return f"{path}  ({n} edit{'s' if n != 1 else ''})"
-    s = json.dumps(args, ensure_ascii=False)
-    return (s[:60] + "…") if len(s) > 60 else s
-
-
-def _print_reasoning_block(text: str) -> None:
-    """Print reasoning lines prefixed with │, dimmed when stdout is a TTY."""
-    use_ansi = getattr(sys.stdout, "isatty", lambda: False)()
-    dim = "\033[2m" if use_ansi else ""
-    reset = "\033[0m" if use_ansi else ""
-    for line in (text.splitlines() or [""]):
-        print(f"    │ {dim}{line}{reset}")
-
-
-def _is_error_output(output: str) -> bool:
+def is_error_output(output: str) -> bool:
     return (output or "").lstrip().startswith("Error:")
 
 
-def _diagnostic_result_hint(name: str, output: str) -> str:
-    """One-line hint for console diagnostics.
-
-    Uses the same core summarizer as the model-facing tool output summaries to
-    avoid duplicate formatting logic.
-    """
-
-    summary, _ = _summarize_tool_output(name, output)
-    first = (summary.splitlines() or ["(empty)"])[0].strip()
-    # Keep it compact for the right margin printing.
-    return (first[:70] + "…") if len(first) > 70 else first
-
-
-def _validate_schema_value(
+def validate_schema_value(
     schema: Dict[str, Any], value: Any, path: str = "args"
 ) -> Optional[str]:
     expected_type = schema.get("type")
@@ -324,7 +287,7 @@ def _validate_schema_value(
                 return f"unexpected argument(s): {', '.join(repr(k) for k in extras)}"
         for key, item in value.items():
             if key in props:
-                err = _validate_schema_value(props[key], item, f"{path}.{key}")
+                err = validate_schema_value(props[key], item, f"{path}.{key}")
                 if err:
                     return err
         return None
@@ -338,7 +301,7 @@ def _validate_schema_value(
         item_schema = schema.get("items")
         if item_schema:
             for idx, item in enumerate(value):
-                err = _validate_schema_value(item_schema, item, f"{path}[{idx}]")
+                err = validate_schema_value(item_schema, item, f"{path}[{idx}]")
                 if err:
                     return err
         return None
@@ -359,35 +322,24 @@ def _validate_schema_value(
     return None
 
 
-def _stable_json(obj: Any) -> str:
-    try:
-        return json.dumps(obj, sort_keys=True, ensure_ascii=False)
-    except Exception:
-        return json.dumps(str(obj), ensure_ascii=False)
-
-
-def _tool_call_key(name: str, args: Dict[str, Any]) -> str:
-    return f"{name}:{_stable_json(args)}"
-
-
-def _parse_bash_exit_code(output: str) -> Optional[int]:
+def parse_bash_exit_code(output: str) -> Optional[int]:
     first = (output.splitlines() or [""])[0].strip()
     m = re.match(r"exit_code:\s*(-?\d+)\s*$", first)
     return int(m.group(1)) if m else None
 
 
-def _summarize_tool_output(name: str, output: str) -> Tuple[str, bool]:
+def summarize_tool_output(name: str, output: str) -> Tuple[str, bool]:
     """Return (summary_text, attach_hint) — used only for the workspace context block."""
     out = output or ""
     out_s = out.strip()
 
-    if _is_error_output(out_s):
+    if is_error_output(out_s):
         msg = out_s[6:].strip()
         msg = (msg[:400] + "…") if len(msg) > 400 else msg
         return f"Error: {msg}", True
 
     if name == "bash":
-        code = _parse_bash_exit_code(out)
+        code = parse_bash_exit_code(out)
         lines = [
             l for l in out.splitlines()[1:] if l and l not in ("STDOUT:", "STDERR:")
         ]
@@ -423,7 +375,33 @@ class Agent:
     reused across runs without state bleed.
     """
 
-    def _emit(self, payload: Dict[str, Any]) -> None:
+    @staticmethod
+    def format_args(name: str, args: Dict[str, Any]) -> str:
+        """Short human-readable preview of tool arguments."""
+        if name == "bash":
+            cmd = (args.get("command") or "").replace("\n", " ").strip()
+            return (cmd[:60] + "…") if len(cmd) > 60 else cmd
+        if name in ("read", "write"):
+            return args.get("path", "")
+        if name == "edit":
+            path = args.get("path", "")
+            n = len(args.get("edits") or [])
+            return f"{path}  ({n} edit{'s' if n != 1 else ''})"
+        s = json.dumps(args, ensure_ascii=False)
+        return (s[:60] + "…") if len(s) > 60 else s
+
+    @staticmethod
+    def stable_json(obj: Any) -> str:
+        try:
+            return json.dumps(obj, sort_keys=True, ensure_ascii=False)
+        except Exception:
+            return json.dumps(str(obj), ensure_ascii=False)
+
+    @classmethod
+    def tool_call_key(cls, name: str, args: Dict[str, Any]) -> str:
+        return f"{name}:{cls.stable_json(args)}"
+
+    def emit(self, payload: Dict[str, Any]) -> None:
         try:
             self.logging.emit(payload)
         except Exception:
@@ -481,13 +459,13 @@ class Agent:
             raise ValueError(f"Unknown tool: {name!r}")
         self._tools[name].enabled = False
 
-    def _enabled_tools(self) -> List[lib.AgentTool]:
+    def enabled_tools(self) -> List[lib.AgentTool]:
         return [tool for tool in self._tools.values() if tool.enabled]
 
-    def _tool_schemas(self) -> List[Dict[str, Any]]:
-        return [tool.to_openai_tool() for tool in self._enabled_tools()]
+    def tool_schemas(self) -> List[Dict[str, Any]]:
+        return [tool.to_openai_tool() for tool in self.enabled_tools()]
 
-    def _execute(
+    def execute_tool(
         self,
         name: str,
         args: Dict[str, Any],
@@ -516,13 +494,13 @@ class Agent:
                 error = f"tool {name!r} arguments must be an object"
                 output = f"Error: {error}"
             else:
-                err = _validate_schema_value(tool.parameters, args)
+                err = validate_schema_value(tool.parameters, args)
                 if err:
                     ok = False
                     error = err
                     output = f"Error: {err}"
                 else:
-                    self._emit(
+                    self.emit(
                         {
                             "event": "tool_start",
                             "run_id": run_id,
@@ -543,11 +521,11 @@ class Agent:
                     # Detect tools that signal failure via error-string return
                     # rather than raising (e.g. "Error: file not found",
                     # "Error: blocked shell syntax detected").
-                    if ok and _is_error_output(output):
+                    if ok and is_error_output(output):
                         ok = False
                         error = output.lstrip()[6:].strip()
 
-        self._emit(
+        self.emit(
             {
                 "event": "tool_end",
                 "run_id": run_id,
@@ -563,7 +541,7 @@ class Agent:
 
         return output
 
-    def _record_rejected_call(
+    def record_rejected_call(
         self,
         state: RunState,
         name: str,
@@ -582,7 +560,7 @@ class Agent:
         state.rejected_calls.append(
             RejectedCall(name=name, args=dict(args) if isinstance(args, dict) else {}, reason=reason)
         )
-        self._emit(
+        self.emit(
             {
                 "event": "tool_rejected",
                 "run_id": run_id,
@@ -593,16 +571,16 @@ class Agent:
             }
         )
 
-    def _record_tool_result(
+    def record_tool_result(
         self, state: RunState, name: str, args: Dict[str, Any], output: str
     ) -> None:
-        summary, _ = _summarize_tool_output(name, output)
+        summary, _ = summarize_tool_output(name, output)
 
         rec = {
             "tool": name,
-            "args_preview": _fmt_args(name, args),
+            "args_preview": self.format_args(name, args),
             "summary": summary[:2000],
-            "ok": not _is_error_output(output or ""),
+            "ok": not is_error_output(output or ""),
         }
         state.recent.append(rec)
         state.recent = state.recent[-12:]
@@ -611,7 +589,7 @@ class Agent:
             state.recent_errors.append(f"{name}: {summary[:400]}")
             state.recent_errors = state.recent_errors[-5:]
 
-    def _workspace_context_block(
+    def workspace_context_block(
         self, state: RunState, *, iteration: int, max_iterations: int
     ) -> str:
         tool_calls_total = int(state.tool_calls_total)
@@ -640,7 +618,7 @@ class Agent:
         return "\n".join(lines).strip()
 
     @staticmethod
-    def _upsert_workspace_context(messages: List[Dict[str, Any]], block: str) -> None:
+    def upsert_workspace_context(messages: List[Dict[str, Any]], block: str) -> None:
         """Append or update WORKSPACE CONTEXT on the last user message.
 
         Keeping this out of the system prompt lets the static system message stay
@@ -682,7 +660,7 @@ class Agent:
         # No user message found yet — prepend as the first user message.
         messages.append({"role": "user", "content": block})
 
-    def _handle_tool_calls(
+    def handle_tool_calls(
         self,
         state: RunState,
         tool_calls: List[Dict[str, Any]],
@@ -726,7 +704,7 @@ class Agent:
                 else self.policy.max_repeated_calls
             )
 
-            key = _tool_call_key(call_name, call_args)
+            key = self.tool_call_key(call_name, call_args)
             state.call_counts[key] = int(state.call_counts.get(key, 0)) + 1
 
             if state.call_counts[key] > max_repeats:
@@ -734,8 +712,8 @@ class Agent:
                     f"Error: repeated tool call blocked after {max_repeats} tries. "
                     "Change arguments (e.g., different offset/limit/path) or change approach."
                 )
-                self._record_tool_result(state, call_name, call_args, hint)
-                self._record_rejected_call(
+                self.record_tool_result(state, call_name, call_args, hint)
+                self.record_rejected_call(
                     state, call_name, call_args, "repeat_blocked",
                     run_id=run_id, iteration=iteration,
                 )
@@ -743,7 +721,7 @@ class Agent:
                 executed_calls.append(call)
                 continue
 
-            self._observer.on_tool_start(call_name, _fmt_args(call_name, call_args))
+            self._observer.on_tool_start(call_name, self.format_args(call_name, call_args))
 
             # If the provider emitted invalid JSON arguments, surface that clearly.
             if raw_args_err:
@@ -754,12 +732,12 @@ class Agent:
                     f"raw_arguments={raw_args!r}\n"
                     "Fix: emit a tool call with a JSON object matching the tool schema."
                 )
-                self._record_rejected_call(
+                self.record_rejected_call(
                     state, call_name, call_args, "bad_json",
                     run_id=run_id, iteration=iteration,
                 )
             else:
-                output = self._execute(
+                output = self.execute_tool(
                     call_name, call_args, run_id=run_id, iteration=iteration,
                     model_text=model_text or None,
                 )
@@ -770,21 +748,21 @@ class Agent:
                     ToolResult(
                         name=call_name,
                         args=dict(call_args),
-                        ok=not _is_error_output(output or ""),
+                        ok=not is_error_output(output or ""),
                         output_preview=(output or "")[:500],
                     )
                 )
 
-            self._record_tool_result(state, call_name, call_args, output)
+            self.record_tool_result(state, call_name, call_args, output)
 
             # If workspace changed, allow repeats again (read-after-edit, re-run bash, etc.).
-            if (not _is_error_output(output or "")) and call_name in ("edit", "write"):
+            if (not is_error_output(output or "")) and call_name in ("edit", "write"):
                 state.call_counts = {}
 
             # Cap very large outputs in the message history to prevent the context
             # window from growing unboundedly across iterations. Errors and small
             # outputs are always passed in full.
-            if not _is_error_output(output) and len(output) > self.policy.max_history_chars:
+            if not is_error_output(output) and len(output) > self.policy.max_history_chars:
                 msg_output = (
                     output[: self.policy.max_history_chars]
                     + f"\n…[output truncated: {len(output) - self.policy.max_history_chars} chars omitted."
@@ -800,7 +778,7 @@ class Agent:
         if skipped > 0:
             for call in tool_calls[self.policy.max_calls_per_iteration:]:
                 call_args = call.get("arguments", {})
-                self._record_rejected_call(
+                self.record_rejected_call(
                     state, call.get("name", ""), call_args, "iteration_skip",
                     run_id=run_id, iteration=iteration,
                 )
@@ -823,7 +801,7 @@ class Agent:
         # Stuck-loop detection: count consecutive iterations where every tool call
         # failed; nudge the agent to emit a BLOCKED answer.
         real_outputs = [o for o in outputs if not o.startswith("Note:")]
-        if real_outputs and all(_is_error_output(o) for o in real_outputs):
+        if real_outputs and all(is_error_output(o) for o in real_outputs):
             state.consecutive_error_iters += 1
         else:
             state.consecutive_error_iters = 0
@@ -869,7 +847,7 @@ class Agent:
         empty_reply_nudged = False
 
         run_id = lib.new_run_id()
-        self._emit(
+        self.emit(
             {
                 "event": "run_start",
                 "run_id": run_id,
@@ -885,21 +863,21 @@ class Agent:
 
         for iteration in range(self.max_iterations):
             iters_done = iteration + 1
-            self._emit(
+            self.emit(
                 {"event": "iteration_start", "run_id": run_id, "iteration": iters_done}
             )
 
             # Refresh compact workspace context each iteration (token efficient grounding).
-            self._upsert_workspace_context(
+            self.upsert_workspace_context(
                 messages,
-                self._workspace_context_block(
+                self.workspace_context_block(
                     state, iteration=iters_done, max_iterations=self.max_iterations
                 ),
             )
 
             model_timer = lib.Timer()
             with self._observer.model_call(iters_done):
-                response = self.model.chat_with_tools(messages, self._tool_schemas())
+                response = self.model.chat_with_tools(messages, self.tool_schemas())
 
             text = (response.get("text") or "").strip()
             tool_calls = response.get("tool_calls") or []
@@ -912,15 +890,15 @@ class Agent:
                 if not output_text and tool_calls:
                     output_text = json.dumps(tool_calls, ensure_ascii=False)
                 iter_usage = TokenUsage(
-                    input=_count_message_tokens(messages),
-                    output=_count_tokens(output_text) if output_text else 0,
+                    input=lib.TextProtocol.count_message_tokens(messages),
+                    output=lib.TextProtocol.count_tokens(output_text) if output_text else 0,
                 )
             state.usage += iter_usage
 
             self._observer.on_model_response(
                 iteration=iters_done, usage=iter_usage, reasoning=reasoning
             )
-            self._emit(
+            self.emit(
                 {
                     "event": "model_response",
                     "run_id": run_id,
@@ -936,14 +914,14 @@ class Agent:
 
             # ReAct rule: if tool calls exist, execute them even if some text is also present.
             if tool_calls:
-                stop = self._handle_tool_calls(
+                stop = self.handle_tool_calls(
                     state, tool_calls, messages, response, text, run_id, iters_done
                 )
                 if stop is not None:
                     stop_reason = stop
                     final_text = None
                     break
-                self._emit(
+                self.emit(
                     {
                         "event": "iteration_end",
                         "run_id": run_id,
@@ -988,7 +966,7 @@ class Agent:
         )
 
         self._observer.on_run_end(result)
-        self._emit(
+        self.emit(
             {
                 "event": "run_end",
                 "run_id": run_id,

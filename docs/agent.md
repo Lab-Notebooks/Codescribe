@@ -1,176 +1,227 @@
-# Agent internals (`codescribe/lib/_agent.py`)
+# Agent internals
 
-This document is a *practical map* of the standalone coding agent.
-It explains what the agent does, how tool calling works, and where the
-safety boundaries are, without re-stating the entire source file.
-
-If you're modifying behavior, treat the code as authoritative:
+This document describes the current agent implementation in
 `codescribe/lib/_agent.py`.
 
-## What the agent is
+## What the agent does
 
-The agent is a small runtime that:
+The agent is an iterative tool-using runtime:
 
-1. sends a task to an LLM,
-2. lets the model request tool executions (`read`, `glob`, `bash`, `edit`, `write`),
-3. feeds tool results back to the model,
-4. repeats until a final answer (or iteration limit).
+1. Build a message list from system prompt, optional chat history, and task.
+2. Call `model.chat_with_tools(messages, tool_schemas)`.
+3. If the model requests tools, execute them.
+4. Feed tool results back into the conversation.
+5. Repeat until final text or a stop condition.
 
-It is backend-agnostic: the model implementation lives in
-`codescribe/lib/_llm.py`.
+The main entry point is `Agent.run(...)`.
 
-## Tool-calling protocol
+## Core data structures
 
-All backends implement a common `chat_with_tools()` interface that the agent
-calls each iteration. What differs is how each backend translates that into a
-provider request:
+### `AgentPolicy`
 
-### Provider-native tool calling
+Execution policy knobs:
 
-OpenAI (`openai-*`), Anthropic (`anthropic-*`), and OpenAI-compatible endpoints
-(`oaic-*`) pass tool schemas to the provider and receive structured tool call
-responses. This is the preferred path.
+- `max_tool_calls_total` default `120`
+- `max_calls_per_iteration` default `10`
+- `max_repeated_calls` default `2`
+- `read_repeat_multiplier` default `3`
+- `max_consecutive_error_iters` default `3`
+- `max_history_chars` default `8000`
 
-Completion rule: a model response with **no tool calls** is treated as the
-final answer.
+### `TokenUsage`
 
-### Strict-JSON emulation
+A normalized token-usage record with:
 
-ARGO (`argo-*`) and local Transformers checkpoints (path) do not support
-provider-native tool calling. Their `chat_with_tools()` implementations inject
-a system prompt that enforces a strict JSON output schema:
+- `input`
+- `output`
+- `reasoning`
+- `cache_write`
+- `cache_read`
 
-```json
-{
-  "text": "optional explanation",
-  "tool_calls": [{"id": "...", "name": "...", "arguments": {...}}]
-}
-```
+`TokenUsage.from_raw(...)` normalizes provider usage dictionaries into this
+shape.
 
-The provider response is parsed by `_parse_strict_tool_json()` in `_llm.py`.
-The agent itself does not differentiate between native and emulated tool
-calls — both paths normalize to the same `{"text", "tool_calls", "usage"}`
-dict.
+### `RunResult`
 
-## Tools and safety boundaries
+`Agent.run()` returns:
 
-Tool implementations live in `codescribe/lib/_tools.py`.
+- `final_text`
+- `stop_reason`
+- `usage`
+- `iterations`
+- `tool_results`
+- `rejected_calls`
 
-### File tools (`read`, `glob`, `edit`, `write`)
+`stop_reason` is one of:
 
-In **bounded** mode (used by `code-scribe loop`), paths are resolved under a
-configured root and attempts to escape the root are rejected.
+- `final_text`
+- `max_iterations`
+- `tool_budget`
 
-`edit` performs **exact** `oldText → newText` replacement and requires
-`oldText` to be unique and non-overlapping.
+### `ToolResult` and `RejectedCall`
 
-### `bash`
+These are intentionally separate.
 
-- Unbounded mode: runs arbitrary shell commands.
-- Bounded mode: validates an allowlisted command set and rejects common shell
-  metacharacters and path escapes.
+- `ToolResult` records tool calls that actually executed.
+- `RejectedCall` records calls the harness refused before execution.
 
-Bounded mode is a constraint layer for "stay in the working tree" workflows.
-It is **not** an OS sandbox.
+Current rejection reasons in the code:
 
-Default bounded allowlist: `ls`, `pwd`, `find`, `grep`, `head`, `tail`, `wc`,
-`git`, `test`, `echo`, `sed`. Loop task files can extend this via a
-`[tools] bash = [...]` TOML section.
+- `repeat_blocked`
+- `bad_json`
+- `iteration_skip`
 
-## Tool-call budget and repetition policy
+## Tool-calling contract
 
-Three internal limits govern tool execution within a single `Agent.run()` call:
+The agent requires a model object that:
 
-| Limit | Default | Meaning |
-|---|---|---|
-| `_max_tool_calls_total` | 120 | Hard cap across the entire run; the agent stops and returns an error string if reached. |
-| `_max_tool_calls_per_iteration` | 10 | At most this many tool calls are executed per LLM turn; excess calls are skipped and the model is notified. |
-| `_max_repeated_calls` | 2 | Identical `(tool, args)` pairs are blocked after this many uses (6 for `read`). Counts reset after a successful `edit` or `write` (workspace changed). |
+- is an instance of one of `lib.ALLOWED_MODEL_TYPES`, and
+- exposes `chat_with_tools(...)`, and
+- reports `supports_native_tools=True`.
 
-Tool outputs larger than 8 000 characters are truncated in the message history to
-prevent unbounded context growth. Errors and small outputs are always passed in
-full. The model is told how many characters were omitted and how to page through
-the rest using `read(path, offset=N)`.
+Important clarification:
 
-## Workspace context injection
+- In this codebase, `supports_native_tools=True` means the backend can
+  participate in the agent tool loop through the unified interface.
+- For OpenAI-compatible and Anthropic backends this is provider-native.
+- For ARGO and local Transformers paths, tool use is emulated in `_llm.py`
+  through strict JSON prompting, but the agent still sees the same shape.
 
-Each iteration the agent injects a compact `WORKSPACE CONTEXT` system
-message with the current iteration count, total tool-call budget used, recent
-tool results, and recent errors. This gives the model lightweight grounding
-without growing the conversation unboundedly.
+## System prompt and workspace context
 
-## Where this shows up in the CLI
+The agent always appends a built-in `_REACT_NUDGE` rules block to the provided
+system prompt.
 
-- `code-scribe agent`: single agent run (unbounded tools)
-- `code-scribe loop`: repeated fresh sessions (bounded tools; writes reports)
-- `--reason`: pass to either command to enable adaptive thinking on Anthropic backends (`anthropic-*`). Reasoning blocks returned by the model are relayed verbatim into the next turn, as required by the Anthropic API. Silently ignored by all other backends. `CODESCRIBE_AGENT_REASONING=1` is supported as a scripting/CI fallback.
+Each iteration it also injects a compact `WORKSPACE CONTEXT` block into the most
+recent user message. That block includes:
 
-## Key extension points
+- current iteration number,
+- total tool calls used,
+- recent tool results,
+- recent errors.
 
-- Add a new tool: implement an `AgentTool` subclass in `_tools.py` and include
-  it in the tool list.
-- Adjust bounded policy: update bounded `bash` allowlist / blocked characters,
-  or path resolution rules in `_resolve_within_root()`.
-- Add a logging sink: implement a class with an `.emit(dict)` method and pass
-  it as `logging=` to `Agent()`. Use `MultiToolLogSink([sink1, sink2])` to fan
-  out to multiple sinks simultaneously (e.g. two TOML log files, or a TOML file
-  + a custom telemetry sink). The built-in `ToolLogToml` sink writes
-  append-only TOML event files; its default path is
-  `.codescribe/logs/toolusage.toml`.
-- Enable/disable individual tools at runtime via `agent.enable_tool(name)` and
-  `agent.disable_tool(name)`. The underlying `AgentTool.enabled` flag controls
-  whether the tool is included in the schema sent to the model and whether
-  execution is permitted.
-- Each `tool_start` event includes `model_reasoning` (first 500 chars of the
-  model's preceding text that triggered the tool call).
-- Each `tool_end` event includes `output_preview` (first 500 chars of actual tool
-  output), `ok` (bool), `error` (string or null), and `duration_ms`.
-  Downstream consumers such as the loop review agent can use `output_preview` to
-  cross-check model-reported results against real tool outputs.
-- Tool outputs are passed to the model as-is — no summarization, no truncation,
-  no `RAW:` wrapper. The `_summarize_tool_output()` helper is used only to
-  populate the compact `WORKSPACE CONTEXT` grounding block, not the model messages.
+This is done by `upsert_workspace_context(...)`.
 
-## Relation to existing agent frameworks
+## Execution flow inside `Agent.run()`
 
-CodeScribe's agent is a deliberate design point in a space occupied by several well-studied frameworks. The sections below place it against the most relevant ones, noting where it converges, where it diverges, and where the divergence is intentional.
+Per iteration:
 
-### ReAct (Yao et al., 2022)
+1. Emit `iteration_start` to the log sink.
+2. Refresh the `WORKSPACE CONTEXT` block.
+3. Call `model.chat_with_tools(...)`.
+4. Normalize usage information.
+5. If tool calls are present:
+   - execute up to `max_calls_per_iteration`,
+   - append provider-specific tool result messages,
+   - continue to the next iteration.
+6. If there are no tool calls and non-empty text exists, stop with `final_text`.
+7. If neither tool calls nor text are returned, inject a correction nudge once
+   and continue.
 
-ReAct ("Synergizing Reasoning and Acting in Language Models", arXiv:2210.03629) is the direct ancestor of CodeScribe's inner loop. The ReAct pattern interleaves *thought* (a chain-of-thought reasoning trace), *action* (a tool call), and *observation* (the tool's return value), cycling until the task is resolved. CodeScribe follows this faithfully: native tool calls are the Action, and tool result messages are the Observation. The system prompt comment in `_agent.py` (`_REACT_NUDGE`) explicitly references this framing.
+## Tool execution and validation
 
-The difference is operational rather than conceptual. ReAct as described in the paper accumulates the full thought–action–observation trajectory in the prompt context across all steps. CodeScribe does **not** grow the conversation unboundedly: instead, each iteration replaces a compact `WORKSPACE CONTEXT` system message that summarises iteration count, total tool-call budget, recent tool results, and recent errors. The full message list is still passed to the model, but the grounding block stays fixed-size. This trades a fraction of per-step context richness for predictable context growth, which matters when agents run for tens of iterations on large codebases.
+`execute_tool(...)` performs several checks:
 
-### Reflexion (Shinn et al., 2023)
+- unknown tool rejection,
+- disabled tool rejection,
+- argument type validation,
+- schema validation via `validate_schema_value(...)`.
 
-Reflexion (arXiv:2303.11366) adds a verbal self-reflection step after each failed episode: the agent produces a natural-language critique of what went wrong, stores it in an episodic memory buffer, and carries that buffer into the next attempt. The reinforcement signal is linguistic rather than gradient-based.
+It emits:
 
-CodeScribe's review agent in loop mode is structurally similar but architecturally separate. The review agent is a *different agent instance* that receives a harness-computed summary of verified actions (derived deterministically from the TOML event log — no LLM involved) and writes a structured `review_output.toml` with pending next steps. It is not the same model reflecting on its own output — it is a second model evaluating an external evidence record. This separation is intentional: it reduces the risk of the reviewer rationalising the executor's mistakes and enforces a strict evidential standard (the review task prompt instructs the reviewer to flag any `<final_answer>` claim not backed by a verified action). Reflexion collapses executor and reflector into a single agent; CodeScribe keeps them structurally distinct.
+- `tool_start`
+- `tool_end`
 
-### SWE-agent (Yang et al., 2024)
+to the configured logging sink.
 
-SWE-agent (arXiv:2405.15793) introduces the concept of an Agent-Computer Interface (ACI): a purpose-built toolset designed specifically for the needs of an LM agent rather than a human developer. The ACI includes a custom file viewer that shows ~100 lines per turn with scroll and in-file search commands, linting on edit submission, and a directory-search tool that returns only filenames (not match context). SWE-agent runs a single agent instance against a bash shell.
+A tool return string beginning with `Error:` is treated as a failed tool call
+even if the tool implementation did not raise an exception.
 
-CodeScribe's tool design is more minimal. It provides `read`, `glob`, `bash`, `edit`, and `write` without ACI-style scaffolding: no built-in scroll command, no automatic linting on edit, no specialised file viewer. The tradeoff is flexibility — CodeScribe's tools are general-purpose and provider-agnostic — at the cost of not having the ergonomic guardrails that SWE-agent's ACI provides. One area where CodeScribe is more careful than SWE-agent's default: repetition detection. The agent tracks a `call_counts` dict per run and blocks repeated identical tool calls (with a higher limit for `read` and a reset after successful `edit`/`write`), preventing the model from spinning in a read loop.
+## Repetition and budgets
 
-### CodeAct (Wang et al., 2024)
+The agent tracks repeated identical `(tool, args)` pairs.
 
-CodeAct (arXiv:2402.01030) replaces structured tool calls with executable Python: the model emits a Python snippet, which runs in an integrated interpreter, and stdout/stderr feed back as the next observation. This collapses the distinction between "tool schema" and "action" — any library-level operation is available, and the agent can self-debug by inspecting interpreter output.
+Current policy:
 
-CodeScribe takes the opposite position. Tool calls are schema-validated, named, and bounded; `bash` is the escape hatch for arbitrary shell work, but it operates under an allowlist in loop mode. The CodeAct approach grants a significantly larger action space at the cost of safety: arbitrary code execution in a shared interpreter is difficult to bound. CodeScribe's bounded bash allowlist (`ls`, `pwd`, `find`, `grep`, `git`, etc., extensible via TOML) is a weaker sandbox — it is a constraint layer, not an OS-level isolation — but it makes the action space auditable and prevents the most common classes of runaway filesystem damage during unattended loop runs.
+- most tools are blocked after `2` identical calls,
+- `read` gets `2 * 3 = 6` tries,
+- successful `edit` or `write` resets repetition counts because the workspace
+  changed.
 
-### OpenHands / OpenDevin (Wang et al., 2024)
+Other limits:
 
-OpenHands (arXiv:2407.16741, formerly OpenDevin) is a platform-scale system built around a persistent event stream. All agent observations and actions are appended to a shared event log; agents consume from this stream and emit new events. The architecture supports multi-agent delegation: a primary orchestrator agent can spawn sub-agents for subtasks, and sub-agents report back through the same event stream. Execution happens inside a Docker sandbox, and the platform supports thousands of concurrent sessions.
+- total executed tool calls are capped at `120`,
+- per-iteration tool executions are capped at `10`.
 
-CodeScribe's scope is narrower in almost every dimension. There is no event stream beyond the per-run TOML event log; there is no runtime agent delegation (the two-agent loop is static: executor then reviewer, in sequence, no dynamic spawning); there is no container sandbox. The session boundary is a Python process lifetime — cross-loop state is carried in-memory by `prompt_loop()` and on-disk artifacts under `.codescribe/loop/` are for inspection and crash-resume only. This is a constraint, but it is also a deployability property: CodeScribe has no daemon, no REST API, and no Docker dependency. It runs wherever Python runs.
+Calls beyond the per-iteration cap are recorded as rejected with reason
+`iteration_skip`.
 
-### LangGraph
+## Tool output handling
 
-LangGraph structures agent execution as a directed graph with a central `StateGraph` object. Nodes are functions (LLM calls or tool runs); edges route between them, with conditional edges enabling the cyclical patterns that agents require. State is a typed dictionary updated incrementally at each node. Persistence, human-in-the-loop checkpoints, and multi-agent composition are first-class features of the graph runtime.
+Tool outputs are recorded in two different ways.
 
-CodeScribe does not use a graph runtime. Its loop is a Python `for` loop over `range(agent_loops)`, with the execution/review alternation expressed as sequential function calls inside that loop. This is less expressive for complex branching logic — there is no conditional routing, no checkpoint/resume, and no dynamic graph rewriting — but it is also significantly simpler to audit, extend, and embed in other Python code. LangGraph's state management is richer; CodeScribe's equivalent is the `_state` dict inside a single `Agent.run()` call (ephemeral, per-run) plus the `loop_summaries` and `pending_items` lists held in-memory by `prompt_loop()` across loop iterations. On-disk files under `.codescribe/loop/` exist for inspection and crash-resume, not as the primary state relay.
+### Full execution channel
 
-### Summary
+Tool outputs are passed back to the model in provider-specific tool-result
+messages.
 
-CodeScribe occupies a specific point in this design space: a **minimal, in-memory-state, two-agent loop** with a stateless-per-session inner agent. It inherits ReAct's reasoning structure, applies a Reflexion-like review phase via a structurally separate second agent that evaluates harness-computed evidence rather than a rendered transcript, and enforces a bounded tool policy similar in spirit to SWE-agent's ACI but simpler in implementation. Relative to OpenHands and LangGraph it forgoes platform features (delegation, event streams, graph routing, container isolation) in exchange for zero infrastructure dependencies and a codebase small enough to read in one sitting. The known gaps — no streaming, no model-failure retry, no wall-clock timeout, no OS-level sandbox — are areas where the more platform-oriented frameworks have already invested.
+### Compact context channel
+
+`summarize_tool_output(...)` creates short summaries only for the injected
+`WORKSPACE CONTEXT` block.
+
+Large successful outputs are truncated before reinsertion into message history if
+longer than `max_history_chars`.
+
+Errors are passed through in full.
+
+## Stuck-loop detection
+
+If every real tool call fails for `max_consecutive_error_iters` consecutive
+iterations, the agent injects a nudge telling the model to stop calling tools
+and emit a `BLOCKED:` section.
+
+This is a behavioral nudge, not a separate stop condition enforced by the
+harness.
+
+## Diagnostics and observers
+
+Verbose output is handled by `ConsoleObserver`.
+
+It shows:
+
+- per-iteration progress,
+- token usage,
+- model reasoning text when present,
+- tool starts and one-line result hints,
+- final run token totals.
+
+Structured logging is separate from console rendering and is routed through the
+configured log sink.
+
+## Runtime tool control
+
+`Agent` exposes:
+
+- `enable_tool(name)`
+- `disable_tool(name)`
+- `enabled_tools()`
+- `tool_schemas()`
+
+These control which tools are advertised and executable.
+
+## Important current limitations
+
+The source currently supports these behaviors; docs should not claim more:
+
+- The agent is not an OS sandbox.
+- Context compaction is limited to the fixed-size `WORKSPACE CONTEXT` summary
+  plus history-output truncation.
+- The agent does not implement a separate planning model or subagent system.
+- The agent runtime is single-process and synchronous.
+
+## Related docs
+
+- [`tools.md`](./tools.md)
+- [`loop.md`](./loop.md)
+- [`models.md`](./models.md)

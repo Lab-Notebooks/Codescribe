@@ -93,7 +93,7 @@ def write_state(path: Path, state: Dict[str, Any]) -> None:
     lib.atomic_write_toml(path, state)
 
 
-def _init_state(*, run_id: str, workdir: Path, task_file: Path) -> Dict[str, Any]:
+def init_state(*, run_id: str, workdir: Path, task_file: Path) -> Dict[str, Any]:
     return {
         "run_id": run_id,
         "workdir": str(workdir),
@@ -129,7 +129,206 @@ class LoopSummary:
     total_cache_read_tokens: int = 0
 
 
-def _loop_summary_from_result(loop_index: int, result: "lib.RunResult") -> LoopSummary:
+@dataclass
+class PromptLoopRunner:
+    task_file: Union[Path, str]
+    model: Union[Path, str]
+    agent_loops: int = 5
+    agent_iterations: int = 30
+    verbose: bool = False
+    logging: Optional[Union[Path, str]] = None
+    workdir: Optional[Union[Path, str]] = None
+    reason: bool = False
+
+    def __post_init__(self) -> None:
+        self.workdir_path = Path(self.workdir).resolve() if self.workdir else Path.cwd().resolve()
+        self.task_path = ensure_within_workdir(Path(self.task_file), self.workdir_path)
+        self.neural_model = lib.set_neural_model(self.model, reasoning=self.reason)  # type: ignore[attr-defined]
+
+        self.chat_history, meta = lib.load_chat_template(self.task_path, return_meta=True)
+        bash_allow = set((meta.get("tools") or {}).get("bash") or [])
+        self.tools = lib.make_tools(self.workdir_path, bash_allow=bash_allow)
+
+        self.run_id = lib.new_run_id()
+        self.paths = get_loop_paths(self.workdir_path)
+        os.makedirs(self.paths.run_dir, exist_ok=True)
+
+        self.task_rel = str(self.task_path.relative_to(self.workdir_path))
+        self.review_output_rel = str(self.paths.review_output_toml.relative_to(self.workdir_path))
+        self.system = build_system_prompt(workdir=self.workdir_path)
+
+        self.run_toml_data: Dict[str, Any] = {
+            "run_id": self.run_id,
+            "created_at": lib.iso_utc_now(),
+            "workdir": str(self.workdir_path),
+            "task_file": str(self.task_path),
+            "model": str(self.model),
+            "agent_loops": int(self.agent_loops),
+            "agent_iterations": int(self.agent_iterations),
+            "cumulative_input_tokens": 0,
+            "cumulative_output_tokens": 0,
+            "cumulative_cache_creation_tokens": 0,
+            "cumulative_cache_read_tokens": 0,
+            "loops_completed": 0,
+        }
+        lib.atomic_write_toml(self.paths.run_toml, self.run_toml_data)
+
+        self.state = init_state(run_id=self.run_id, workdir=self.workdir_path, task_file=self.task_path)
+        write_state(self.paths.state_toml, self.state)
+
+        self.loop_summaries: List[LoopSummary] = []
+        self.review_summaries: List[LoopSummary] = []
+        self.pending_items: List[str] = []
+        self.loops_completed = 0
+        self.task_mtime: float = 0.0
+
+    def reload_task_context_if_needed(self) -> None:
+        try:
+            current_mtime = self.task_path.stat().st_mtime
+        except OSError:
+            current_mtime = 0.0
+        if current_mtime != self.task_mtime:
+            self.chat_history, meta = lib.load_chat_template(self.task_path, return_meta=True)
+            bash_allow = set((meta.get("tools") or {}).get("bash") or [])
+            self.tools = lib.make_tools(self.workdir_path, bash_allow=bash_allow)
+            self.task_mtime = current_mtime
+
+    def persist_run_progress(self, loop_idx: int) -> None:
+        update_cumulative_tokens(self.run_toml_data, self.loop_summaries + self.review_summaries)
+        self.run_toml_data["loops_completed"] = loop_idx
+        lib.atomic_write_toml(self.paths.run_toml, self.run_toml_data)
+        self.loops_completed = loop_idx
+
+    def run_execution_phase(self, loop_idx: int) -> tuple[LoopSummary, str, Optional[str]]:
+        if self.verbose:
+            print(f"\n▶  loop {loop_idx} [execution]")
+
+        self.state["run_id"] = self.run_id
+        self.state["loop_index"] = loop_idx
+        self.state["phase"] = "execution"
+        write_state(self.paths.state_toml, self.state)
+
+        lib.atomic_write_text(self.paths.execution_toml, "")
+
+        exec_log: lib.ToolLogSink = lib.ToolLogToml(path=str(self.paths.execution_toml))
+        if self.logging is not None:
+            extra_log = lib.ToolLogToml(path=str(self.logging) if str(self.logging) else None)
+            exec_log = lib.MultiToolLogSink([exec_log, extra_log])
+
+        exec_agent = lib.Agent(
+            self.neural_model,
+            tools=self.tools,
+            max_iterations=self.agent_iterations,
+            show_diagnostics=self.verbose,
+            logging=exec_log,
+        )
+
+        task_content = ""
+        if loop_idx == 1:
+            try:
+                task_content = (self.workdir_path / self.task_rel).read_text(errors="replace")
+            except OSError:
+                pass
+
+        exec_task = build_execution_task(
+            workdir=self.workdir_path,
+            task_rel=self.task_rel,
+            task_content=task_content,
+            loop_idx=loop_idx,
+            agent_loops=self.agent_loops,
+            loop_summaries=self.loop_summaries,
+            pending_items=self.pending_items,
+        )
+
+        exec_result = exec_agent.run(exec_task, system=self.system, chat_history=self.chat_history)
+        exec_answer = exec_result.final_text or ""
+        loop_summary = loop_summary_from_result(loop_idx, exec_result)
+        self.loop_summaries.append(loop_summary)
+        self.pending_items = extract_pending_items(exec_answer)
+        self.persist_run_progress(loop_idx)
+        return loop_summary, exec_answer, extract_status(exec_answer)
+
+    def run_review_phase(self, loop_idx: int, loop_summary: LoopSummary, exec_answer: str) -> bool:
+        if self.verbose:
+            print(f"\n▶  loop {loop_idx} [review]")
+
+        self.state["phase"] = "review"
+        write_state(self.paths.state_toml, self.state)
+
+        review_bash_allow = {"ls", "stat", "pwd", "find", "grep", "head", "tail", "which", "env", "rg"}
+        review_tools = [t for t in self.tools if t.name in ("read", "glob", "write")]
+        review_tools.append(lib.BashTool(cwd=self.workdir_path, bounded=True, allowed_commands=review_bash_allow))
+        review_agent = lib.Agent(
+            self.neural_model,
+            tools=review_tools,
+            max_iterations=max(6, self.agent_iterations // 2),
+            show_diagnostics=self.verbose,
+            logging=lib.ToolLogToml(path=str(self.paths.run_dir / "review.toml")),
+        )
+
+        review_task = build_review_task(
+            workdir=self.workdir_path,
+            task_rel=self.task_rel,
+            review_output_rel=self.review_output_rel,
+            loop_index=loop_idx,
+            loop_summary=loop_summary,
+            exec_answer=exec_answer or "",
+        )
+
+        review_result = review_agent.run(review_task, system=self.system)
+        review_loop_summary = loop_summary_from_result(loop_idx, review_result)
+        self.review_summaries.append(review_loop_summary)
+        self.persist_run_progress(loop_idx)
+
+        review_data = read_review_output(self.paths.review_output_toml)
+        if not review_data:
+            return False
+
+        raw_pending = review_data.get("pending") or []
+        if isinstance(raw_pending, list):
+            reviewed_items = [
+                p.get("item", "") if isinstance(p, dict) else str(p)
+                for p in raw_pending
+                if p
+            ]
+            self.pending_items = [x for x in reviewed_items if x]
+
+        blocker = review_data.get("blocker", "")
+        if not self.pending_items and not blocker:
+            if self.verbose:
+                print(
+                    f"\n✓ No pending items and no blocker after loop {loop_idx} "
+                    "— task complete, stopping early."
+                )
+            return True
+
+        return False
+
+    def run(self) -> str:
+        for loop_idx in range(1, self.agent_loops + 1):
+            self.reload_task_context_if_needed()
+            loop_summary, exec_answer, status = self.run_execution_phase(loop_idx)
+
+            if status == "COMPLETE":
+                if self.verbose:
+                    print(
+                        f"\n✓ execution agent reported STATUS: COMPLETE after loop {loop_idx} "
+                        "— task complete, stopping early."
+                    )
+                self.pending_items = []
+                break
+
+            if self.run_review_phase(loop_idx, loop_summary, exec_answer):
+                break
+
+        return (
+            f"completed {self.loops_completed}/{self.agent_loops} loop(s) "
+            f"— run: {self.run_id} "
+            f"— artifacts: {self.paths.run_dir}"
+        )
+
+
+def loop_summary_from_result(loop_index: int, result: "lib.RunResult") -> LoopSummary:
     """Build a LoopSummary directly from an Agent RunResult.
 
     This consumes the structured result the agent returns rather than re-parsing
@@ -210,7 +409,7 @@ def build_system_prompt(*, workdir: Path) -> str:
     )
 
 
-def _fmt_loop_context(
+def format_loop_context(
     *,
     loop_idx: int,
     agent_loops: int,
@@ -275,7 +474,7 @@ def build_execution_task(
     loop_summaries: List[LoopSummary],
     pending_items: List[str],
 ) -> str:
-    context = _fmt_loop_context(
+    context = format_loop_context(
         loop_idx=loop_idx,
         agent_loops=agent_loops,
         loop_summaries=loop_summaries,
@@ -404,7 +603,7 @@ def build_review_task(
 # prompt_loop command
 # ---------------------------------------------------------------------------
 
-def _ensure_within_workdir(path: Path, workdir: Path) -> Path:
+def ensure_within_workdir(path: Path, workdir: Path) -> Path:
     path = path.resolve()
     workdir = workdir.resolve()
     try:
@@ -414,7 +613,7 @@ def _ensure_within_workdir(path: Path, workdir: Path) -> Path:
     return path
 
 
-def _extract_pending_items(final_text: str) -> List[str]:
+def extract_pending_items(final_text: str) -> List[str]:
     """Parse NEXT STEPS: section from an execution agent's final_answer."""
     items: List[str] = []
     in_section = False
@@ -436,7 +635,7 @@ def _extract_pending_items(final_text: str) -> List[str]:
     return items[:5]
 
 
-def _extract_status(final_text: str) -> Optional[str]:
+def extract_status(final_text: str) -> Optional[str]:
     """Parse a `STATUS: COMPLETE` / `STATUS: INCOMPLETE` line from a final answer.
 
     Returns "COMPLETE", "INCOMPLETE", or None if no status line was emitted.
@@ -452,7 +651,7 @@ def _extract_status(final_text: str) -> Optional[str]:
     return None
 
 
-def _update_cumulative_tokens(
+def update_cumulative_tokens(
     run_toml_data: Dict[str, Any], summaries: List[LoopSummary]
 ) -> None:
     """Roll up per-loop token totals into the run.toml record (in place)."""
@@ -466,7 +665,7 @@ def _update_cumulative_tokens(
     )
 
 
-def _read_review_output(path: Path) -> Dict[str, Any]:
+def read_review_output(path: Path) -> Dict[str, Any]:
     """Read the review agent's structured TOML output."""
     data = lib.read_toml(path)
     return data
@@ -499,203 +698,14 @@ def prompt_loop(
       execution.toml       — raw TOML event log for the most recent execution phase
       review_output.toml   — review agent's structured output
     """
-
-    workdir_path = Path(workdir).resolve() if workdir else Path.cwd().resolve()
-    task_path = _ensure_within_workdir(Path(task_file), workdir_path)
-
-    neural_model = lib.set_neural_model(model, reasoning=reason)  # type: ignore[attr-defined]
-
-    chat_history, meta = lib.load_chat_template(task_path, return_meta=True)
-    bash_allow = set((meta.get("tools") or {}).get("bash") or [])
-    tools = lib.make_tools(workdir_path, bash_allow=bash_allow)
-
-    run_id = lib.new_run_id()
-    paths = get_loop_paths(workdir_path)
-    os.makedirs(paths.run_dir, exist_ok=True)
-
-    task_rel = str(task_path.relative_to(workdir_path))
-    review_output_rel = str(paths.review_output_toml.relative_to(workdir_path))
-
-    run_toml_data: Dict[str, Any] = {
-        "run_id": run_id,
-        "created_at": lib.iso_utc_now(),
-        "workdir": str(workdir_path),
-        "task_file": str(task_path),
-        "model": str(model),
-        "agent_loops": int(agent_loops),
-        "agent_iterations": int(agent_iterations),
-        "cumulative_input_tokens": 0,
-        "cumulative_output_tokens": 0,
-        "cumulative_cache_creation_tokens": 0,
-        "cumulative_cache_read_tokens": 0,
-        "loops_completed": 0,
-    }
-    lib.atomic_write_toml(paths.run_toml, run_toml_data)
-
-    state = _init_state(run_id=run_id, workdir=workdir_path, task_file=task_path)
-    write_state(paths.state_toml, state)
-
-    system = build_system_prompt(workdir=workdir_path)
-
-    # -----------------------------------------------------------------
-    # In-memory cross-loop state — never written to files between loops.
-    # -----------------------------------------------------------------
-    loop_summaries: List[LoopSummary] = []
-    review_summaries: List[LoopSummary] = []
-    pending_items: List[str] = []
-
-    loops_completed = 0
-    _task_mtime: float = 0.0  # track mtime to avoid re-parsing unchanged task file
-
-    for loop_idx in range(1, agent_loops + 1):
-        # Re-load only when the task file has actually changed on disk.
-        try:
-            current_mtime = task_path.stat().st_mtime
-        except OSError:
-            current_mtime = 0.0
-        if current_mtime != _task_mtime:
-            chat_history, meta = lib.load_chat_template(task_path, return_meta=True)
-            bash_allow = set((meta.get("tools") or {}).get("bash") or [])
-            tools = lib.make_tools(workdir_path, bash_allow=bash_allow)
-            _task_mtime = current_mtime
-
-        # ----------------------
-        # Phase 1: EXECUTION
-        # ----------------------
-        if verbose:
-            print(f"\n▶  loop {loop_idx} [execution]")
-
-        state["run_id"] = run_id
-        state["loop_index"] = loop_idx
-        state["phase"] = "execution"
-        write_state(paths.state_toml, state)
-
-        # Clear the TOML event log so it contains only this loop's events.
-        lib.atomic_write_text(paths.execution_toml, "")
-
-        exec_log: lib.ToolLogSink = lib.ToolLogToml(path=str(paths.execution_toml))
-        if logging is not None:
-            extra_log = lib.ToolLogToml(path=str(logging) if str(logging) else None)
-            exec_log = lib.MultiToolLogSink([exec_log, extra_log])
-
-        exec_agent = lib.Agent(
-            neural_model,
-            tools=tools,
-            max_iterations=agent_iterations,
-            show_diagnostics=verbose,
-            logging=exec_log,
-        )
-
-        task_content = ""
-        if loop_idx == 1:
-            try:
-                task_content = (workdir_path / task_rel).read_text(errors="replace")
-            except OSError:
-                pass
-
-        exec_task = build_execution_task(
-            workdir=workdir_path,
-            task_rel=task_rel,
-            task_content=task_content,
-            loop_idx=loop_idx,
-            agent_loops=agent_loops,
-            loop_summaries=loop_summaries,
-            pending_items=pending_items,
-        )
-
-        exec_result = exec_agent.run(exec_task, system=system, chat_history=chat_history)
-        exec_answer = exec_result.final_text or ""
-
-        # Build the loop summary directly from the agent's structured result
-        # (deterministic — no LLM, no event-log re-parse).
-        loop_summary = _loop_summary_from_result(loop_idx, exec_result)
-        loop_summaries.append(loop_summary)
-
-        # Optimistically extract NEXT STEPS from the final answer so the review
-        # agent has a starting point even if it can't improve on them.
-        status = _extract_status(exec_answer)
-        pending_items = _extract_pending_items(exec_answer)
-
-        # Update run.toml with cumulative token usage after each execution phase.
-        _update_cumulative_tokens(run_toml_data, loop_summaries + review_summaries)
-        run_toml_data["loops_completed"] = loop_idx
-        lib.atomic_write_toml(paths.run_toml, run_toml_data)
-
-        loops_completed = loop_idx
-
-        # Early exit: the execution agent self-reported completion (all tasks done
-        # and checks passing). Trust it and skip the review pass — this is what
-        # lets a fully-solvable task finish in a single loop.
-        if status == "COMPLETE":
-            if verbose:
-                print(
-                    f"\n✓ execution agent reported STATUS: COMPLETE after loop {loop_idx} "
-                    "— task complete, stopping early."
-                )
-            pending_items = []
-            break
-
-        # ----------------------
-        # Phase 2: REVIEW
-        # ----------------------
-        if verbose:
-            print(f"\n▶  loop {loop_idx} [review]")
-
-        state["phase"] = "review"
-        write_state(paths.state_toml, state)
-
-        # Review agent: read/glob/write for state file handoff + restricted bash for diagnostics.
-        review_bash_allow = {"ls", "stat", "pwd", "find", "grep", "head", "tail", "which", "env", "rg"}
-        review_tools = [t for t in tools if t.name in ("read", "glob", "write")]
-        review_tools.append(lib.BashTool(cwd=workdir_path, bounded=True, allowed_commands=review_bash_allow))
-        review_agent = lib.Agent(
-            neural_model,
-            tools=review_tools,
-            max_iterations=max(6, agent_iterations // 2),
-            show_diagnostics=verbose,
-            logging=lib.ToolLogToml(path=str(paths.run_dir / "review.toml")),
-        )
-
-        review_task = build_review_task(
-            workdir=workdir_path,
-            task_rel=task_rel,
-            review_output_rel=review_output_rel,
-            loop_index=loop_idx,
-            loop_summary=loop_summary,
-            exec_answer=exec_answer or "",
-        )
-
-        review_result = review_agent.run(review_task, system=system)
-
-        review_summaries.append(_loop_summary_from_result(loop_idx, review_result))
-        _update_cumulative_tokens(run_toml_data, loop_summaries + review_summaries)
-        lib.atomic_write_toml(paths.run_toml, run_toml_data)
-
-        # Read the review agent's structured output and update in-memory state.
-        review_data = _read_review_output(paths.review_output_toml)
-        if review_data:
-            raw_pending = review_data.get("pending") or []
-            if isinstance(raw_pending, list):
-                reviewed_items = [
-                    p.get("item", "") if isinstance(p, dict) else str(p)
-                    for p in raw_pending
-                    if p
-                ]
-                pending_items = [x for x in reviewed_items if x]
-
-            # Early exit: if the review reports no pending items and no blocker,
-            # the task is done — no need to consume the remaining loop budget.
-            blocker = review_data.get("blocker", "")
-            if not pending_items and not blocker:
-                if verbose:
-                    print(
-                        f"\n✓ No pending items and no blocker after loop {loop_idx} "
-                        "— task complete, stopping early."
-                    )
-                break
-
-    return (
-        f"completed {loops_completed}/{agent_loops} loop(s) "
-        f"— run: {run_id} "
-        f"— artifacts: {paths.run_dir}"
+    runner = PromptLoopRunner(
+        task_file=task_file,
+        model=model,
+        agent_loops=agent_loops,
+        agent_iterations=agent_iterations,
+        verbose=verbose,
+        logging=logging,
+        workdir=workdir,
+        reason=reason,
     )
+    return runner.run()

@@ -5,9 +5,10 @@ import os, importlib, json, requests
 from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 
+from codescribe import lib
+
 __all__ = [
     "OpenAICompModel",
-    "OpenAIModel",
     "ArgoModel",
     "AnthropicModel",
     "TFModel",
@@ -17,13 +18,45 @@ __all__ = [
 ]
 
 
-class _OpenAIBaseModel:
+class OpenAICompModel:
     outputs = 1
     # Provider "max_tokens" (OpenAI Responses/ChatCompletions style) is the maximum
     # number of tokens the model may generate for the reply (i.e., output tokens).
     # Default bumped to allow more verbose reasoning / planning.
     max_tokens = int(os.getenv("CODESCRIBE_MAX_TOKENS", "24576"))
     reasoning_effort: Optional[str] = "high"
+
+    def __init__(self, model: str, profile: str = "oaic") -> None:
+        openai = importlib.import_module("openai")
+
+        self.model = model
+        self.profile = profile
+
+        if profile == "openai":
+            self.apikey = os.getenv("OPENAI_API_KEY")
+            if not self.apikey:
+                raise ValueError("OPENAI_API_KEY environment variable is not set")
+            self.baseurl = None
+            self.provider = None
+            self.pipeline = openai.OpenAI(api_key=self.apikey)
+        elif profile == "oaic":
+            self.baseurl = os.getenv("OPENAI_COMP_BASEURL")
+            if not self.baseurl:
+                raise ValueError("OPENAI_COMP_BASEURL environment variable is not set")
+
+            self.provider = os.getenv("OPENAI_COMP_PROVIDER")
+            if not self.provider:
+                raise ValueError("OPENAI_COMP_PROVIDER environment variable is not set")
+
+            self.apikey = os.getenv("OPENAI_COMP_APIKEY")
+            if not self.apikey:
+                raise ValueError("OPENAI_COMP_APIKEY environment variable is not set")
+
+            self.pipeline = openai.OpenAI(api_key=self.apikey, base_url=self.baseurl)
+        else:
+            raise ValueError(f"Unknown OpenAI profile '{profile}'. Use 'openai' or 'oaic'.")
+
+        self.last_usage = None
 
     @property
     def supports_native_tools(self) -> bool:
@@ -97,46 +130,11 @@ class _OpenAIBaseModel:
             )
         return messages
 
-
-class OpenAICompModel(_OpenAIBaseModel):
-    def __init__(self, model: str) -> None:
-        openai = importlib.import_module("openai")
-
-        self.baseurl = os.getenv("OPENAI_COMP_BASEURL")
-        if not self.baseurl:
-            raise ValueError("OPENAI_COMP_BASEURL environment variable is not set")
-
-        self.provider = os.getenv("OPENAI_COMP_PROVIDER")
-        if not self.provider:
-            raise ValueError("OPENAI_COMP_PROVIDER environment variable is not set")
-
-        self.model = model
-
-        self.apikey = os.getenv("OPENAI_COMP_APIKEY")
-        if not self.apikey:
-            raise ValueError("OPENAI_COMP_APIKEY environment variable is not set")
-
-        self.pipeline = openai.OpenAI(api_key=self.apikey, base_url=self.baseurl)
-        self.last_usage = None
-
     def __repr__(self) -> str:
-        return f"OpenAICompModel(model='{self.model}')"
-
-
-class OpenAIModel(_OpenAIBaseModel):
-    def __init__(self, model: str) -> None:
-        openai = importlib.import_module("openai")
-
-        self.apikey = os.getenv("OPENAI_API_KEY")
-        if not self.apikey:
-            raise ValueError("OPENAI_API_KEY environment variable is not set")
-
-        self.pipeline = openai.OpenAI(api_key=self.apikey)
-        self.model = model
-        self.last_usage = None
-
-    def __repr__(self) -> str:
-        return f"OpenAIModel(model='{self.model}', outputs={self.outputs}, max_tokens={self.max_tokens})"
+        return (
+            f"OpenAICompModel(model='{self.model}', profile='{self.profile}', "
+            f"outputs={self.outputs}, max_tokens={self.max_tokens})"
+        )
 
 
 class ArgoModel:
@@ -204,7 +202,9 @@ class ArgoModel:
             system_prompt = ""
 
         tool_system = (
-            _STRICT_TOOL_JSON_SYSTEM + "\n\n" + _tools_to_strict_json_spec(tools)
+            lib.TextProtocol.STRICT_TOOL_JSON_SYSTEM
+            + "\n\n"
+            + lib.TextProtocol.tools_to_strict_json_spec(tools)
         )
         system_prompt = (system_prompt + "\n\n" + tool_system).strip()
 
@@ -214,7 +214,7 @@ class ArgoModel:
         )
 
         raw = self._post(system_prompt, prompt_text)
-        parsed = _parse_strict_tool_json(raw)
+        parsed = lib.TextProtocol.parse_strict_tool_json(raw)
         self.last_usage = None
         return {
             "text": parsed.get("text", ""),
@@ -264,7 +264,14 @@ class ArgoModel:
 
 
 class AnthropicModel:
-    def __init__(self, model: str, reasoning: bool = False) -> None:
+    def __init__(
+        self,
+        model: str,
+        reasoning: bool = False,
+        streaming: Optional[bool] = None,
+        prompt_caching: Optional[bool] = None,
+        thinking: Optional[Dict[str, Any]] = None,
+    ) -> None:
         anthropic = importlib.import_module("anthropic")
 
         self.apikey = os.getenv("ANTHROPIC_API_KEY")
@@ -272,34 +279,56 @@ class AnthropicModel:
             raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
 
         self.base_url = os.getenv("ANTHROPIC_BASE_URL")
-        self.prompt_caching = os.getenv("CODESCRIBE_ANTHROPIC_CACHE", "1").lower() not in ("0", "false", "no")
+        env_streaming = os.getenv("CODESCRIBE_ANTHROPIC_STREAMING", "1").lower() not in (
+            "0",
+            "false",
+            "no",
+        )
+        env_prompt_caching = os.getenv("CODESCRIBE_ANTHROPIC_CACHE", "1").lower() not in (
+            "0",
+            "false",
+            "no",
+        )
+        env_reasoning = os.getenv("CODESCRIBE_AGENT_REASONING", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
+        self.streaming = env_streaming if streaming is None else streaming
+        self.prompt_caching = (
+            env_prompt_caching if prompt_caching is None else prompt_caching
+        )
+        self.reasoning_enabled = reasoning or env_reasoning
+        self.thinking = (
+            thinking
+            if thinking is not None
+            else {"type": "adaptive", "display": "summarized"}
+            if self.reasoning_enabled
+            else None
+        )
+
         client_kwargs = {"api_key": self.apikey}
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
         if self.prompt_caching:
             # Request 1-hour cache TTL instead of the default 5 minutes so the
             # system prompt and tool schemas stay warm across loop boundaries.
-            client_kwargs["default_headers"] = {"anthropic-beta": "extended-cache-ttl-2025-04-11"}
+            client_kwargs["default_headers"] = {
+                "anthropic-beta": "extended-cache-ttl-2025-04-11"
+            }
 
         self.client = anthropic.Anthropic(**client_kwargs)
         self.model = model
         self.max_tokens = int(os.getenv("CODESCRIBE_MAX_TOKENS", "32768"))
         self.last_usage = None
-        env_reasoning = os.getenv("CODESCRIBE_AGENT_REASONING", "").lower() in ("1", "true", "yes")
-        self.reasoning_enabled = reasoning or env_reasoning
 
     @property
     def supports_native_tools(self) -> bool:
         return True
 
     def chat(self, chat_template: List[Dict[str, str]]) -> str:
-        system_parts: List[str] = []
-        messages = []
-        for msg in chat_template:
-            if msg["role"] == "system":
-                system_parts.append(msg["content"])
-            else:
-                messages.append({"role": msg["role"], "content": msg["content"]})
+        system_parts, messages = anthropic_split_messages(chat_template)
 
         kwargs = {
             "model": self.model,
@@ -307,84 +336,64 @@ class AnthropicModel:
             "messages": messages,
         }
         if system_parts:
-            if self.prompt_caching:
-                # Cache only the first (static) system block; later blocks are dynamic.
-                blocks = [{"type": "text", "text": system_parts[0], "cache_control": {"type": "ephemeral"}}]
-                blocks += [{"type": "text", "text": p} for p in system_parts[1:]]
-                kwargs["system"] = blocks
-            else:
-                kwargs["system"] = "\n\n".join(system_parts)
+            kwargs["system"] = anthropic_system_param(
+                system_parts, prompt_caching=self.prompt_caching
+            )
 
-        # Newer anthropic-sdk-python versions require streaming for long requests
-        # (server-side enforcement for operations that may exceed ~10 minutes).
-        # We prefer streaming here and reconstruct the final text.
-        try:
-            stream = self.client.messages.stream(**kwargs)
-        except Exception:
-            # Fallback to non-streaming if the installed SDK/provider permits it.
-            response = self.client.messages.create(**kwargs)
-            self.last_usage = _normalize_anthropic_usage(getattr(response, "usage", None))
-            for block in response.content:
-                if block.type == "text":
-                    return block.text
-            return ""
+        if self.streaming:
+            # Newer anthropic-sdk-python versions require streaming for long requests
+            # (server-side enforcement for operations that may exceed ~10 minutes).
+            # Prefer streaming when enabled, but still fall back for older SDKs/providers.
+            try:
+                stream = self.client.messages.stream(**kwargs)
+            except Exception:
+                stream = None
+            if stream is not None:
+                text_parts: List[str] = []
+                start_usage = None
+                delta_output_tokens = 0
+                with stream as s:
+                    for event in s:
+                        et = getattr(event, "type", None)
+                        if et == "message_start":
+                            msg = getattr(event, "message", None)
+                            if msg is not None:
+                                start_usage = getattr(msg, "usage", None)
+                        elif et == "message_delta":
+                            du = getattr(event, "usage", None)
+                            if du is not None:
+                                delta_output_tokens = int(
+                                    getattr(du, "output_tokens", 0) or 0
+                                )
+                        elif et == "content_block_delta":
+                            delta = getattr(event, "delta", None)
+                            if getattr(delta, "type", None) == "text_delta":
+                                text_parts.append(getattr(delta, "text", "") or "")
 
-        text_parts: List[str] = []
-        start_usage = None
-        delta_output_tokens = 0
-        with stream as s:
-            for event in s:
-                et = getattr(event, "type", None)
-                if et == "message_start":
-                    msg = getattr(event, "message", None)
-                    if msg is not None:
-                        start_usage = getattr(msg, "usage", None)
-                elif et == "message_delta":
-                    du = getattr(event, "usage", None)
-                    if du is not None:
-                        delta_output_tokens = int(getattr(du, "output_tokens", 0) or 0)
-                elif et == "content_block_delta":
-                    delta = getattr(event, "delta", None)
-                    if getattr(delta, "type", None) == "text_delta":
-                        text_parts.append(getattr(delta, "text", "") or "")
+                self.last_usage = _merge_stream_usage(start_usage, delta_output_tokens)
+                return "".join(text_parts)
 
-        self.last_usage = _merge_stream_usage(start_usage, delta_output_tokens)
-        return "".join(text_parts)
+        response = self.client.messages.create(**kwargs)
+        self.last_usage = _normalize_anthropic_usage(getattr(response, "usage", None))
+        for block in response.content:
+            if block.type == "text":
+                return block.text
+        return ""
 
     def chat_with_tools(
         self, chat_template: List[Dict[str, Any]], tools: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
-        system_parts: List[str] = []
-        messages: List[Dict[str, Any]] = []
-        for msg in chat_template:
-            if msg["role"] == "system":
-                system_parts.append(msg["content"])
-            else:
-                messages.append(msg)
+        system_parts, messages = anthropic_split_messages(chat_template)
+        messages = anthropic_apply_message_cache_breakpoint(
+            messages, prompt_caching=self.prompt_caching
+        )
 
         anthropic_tools = [_openai_tool_to_anthropic_tool(tool) for tool in tools]
         if self.prompt_caching and anthropic_tools:
-            anthropic_tools[-1] = {**anthropic_tools[-1], "cache_control": {"type": "ephemeral"}}
-
-        # Add a cache breakpoint on the penultimate user message so the growing
-        # tool-call / tool-result history is served from cache on each iteration.
-        if self.prompt_caching and len(messages) >= 2:
-            n_user = 0
-            for i in range(len(messages) - 1, -1, -1):
-                if messages[i]["role"] == "user":
-                    n_user += 1
-                    if n_user == 2:
-                        m = messages[i]
-                        c = m.get("content", "")
-                        if isinstance(c, str):
-                            # Convert to block format so cache_control can be attached.
-                            messages[i] = dict(m, content=[{"type": "text", "text": c, "cache_control": {"type": "ephemeral"}}])
-                        elif isinstance(c, list) and c:
-                            last = c[-1]
-                            if isinstance(last, dict) and "cache_control" not in last:
-                                new_c = c[:-1] + [{**last, "cache_control": {"type": "ephemeral"}}]
-                                messages[i] = dict(m, content=new_c)
-                        break
+            anthropic_tools[-1] = {
+                **anthropic_tools[-1],
+                "cache_control": {"type": "ephemeral"},
+            }
 
         kwargs = {
             "model": self.model,
@@ -393,71 +402,69 @@ class AnthropicModel:
             "tools": anthropic_tools,
         }
         if system_parts:
-            if self.prompt_caching:
-                # Cache only the first (static) block; subsequent blocks (e.g. WORKSPACE
-                # CONTEXT) are now in user messages, so system_parts should have length 1.
-                blocks = [{"type": "text", "text": system_parts[0], "cache_control": {"type": "ephemeral"}}]
-                blocks += [{"type": "text", "text": p} for p in system_parts[1:]]
-                kwargs["system"] = blocks
-            else:
-                kwargs["system"] = "\n\n".join(system_parts)
-        if self.reasoning_enabled:
-            # display defaults to "summarized" on Opus 4.6 but "omitted" on Opus
-            # 4.7/4.8 and Fable 5 — omitted returns thinking blocks with empty
-            # text, so reasoning looks broken on newer models. Opt in explicitly
-            # so the readable summary comes back on every model.
-            kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
+            kwargs["system"] = anthropic_system_param(
+                system_parts, prompt_caching=self.prompt_caching
+            )
+        if self.thinking is not None:
+            kwargs["thinking"] = self.thinking
 
-        # Prefer streaming for long requests; accumulate events and normalize into
-        # the same {text, tool_calls, usage} shape as non-streaming.
-        try:
-            stream = self.client.messages.stream(**kwargs)
-        except Exception:
-            response = self.client.messages.create(**kwargs)
-            usage = _normalize_anthropic_usage(getattr(response, "usage", None))
-            self.last_usage = usage
-            return _normalize_anthropic_tool_response(response, usage)
-
-        text_parts: List[str] = []
-        tool_calls: List[Dict[str, Any]] = []
-        final_message = None
-        start_usage = None
-        delta_output_tokens = 0
-
-        with stream as s:
-            for event in s:
-                et = getattr(event, "type", None)
-                if et == "message_start":
-                    msg = getattr(event, "message", None)
-                    if msg is not None:
-                        start_usage = getattr(msg, "usage", None)
-                elif et == "message_delta":
-                    du = getattr(event, "usage", None)
-                    if du is not None:
-                        delta_output_tokens = int(getattr(du, "output_tokens", 0) or 0)
-                elif et == "content_block_delta":
-                    delta = getattr(event, "delta", None)
-                    if getattr(delta, "type", None) == "text_delta":
-                        text_parts.append(getattr(delta, "text", "") or "")
+        if self.streaming:
+            # Prefer streaming for long requests; accumulate events and normalize into
+            # the same {text, tool_calls, usage} shape as non-streaming.
             try:
-                final_message = s.get_final_message()
+                stream = self.client.messages.stream(**kwargs)
             except Exception:
-                pass
+                stream = None
+            if stream is not None:
+                text_parts: List[str] = []
+                final_message = None
+                start_usage = None
+                delta_output_tokens = 0
 
-        # Use event-captured usage (reliable even with extended thinking);
-        # get_final_message() is still attempted for content extraction.
-        usage = _merge_stream_usage(start_usage, delta_output_tokens)
+                with stream as s:
+                    for event in s:
+                        et = getattr(event, "type", None)
+                        if et == "message_start":
+                            msg = getattr(event, "message", None)
+                            if msg is not None:
+                                start_usage = getattr(msg, "usage", None)
+                        elif et == "message_delta":
+                            du = getattr(event, "usage", None)
+                            if du is not None:
+                                delta_output_tokens = int(
+                                    getattr(du, "output_tokens", 0) or 0
+                                )
+                        elif et == "content_block_delta":
+                            delta = getattr(event, "delta", None)
+                            if getattr(delta, "type", None) == "text_delta":
+                                text_parts.append(getattr(delta, "text", "") or "")
+                    try:
+                        final_message = s.get_final_message()
+                    except Exception:
+                        pass
+
+                # Use event-captured usage (reliable even with extended thinking);
+                # get_final_message() is still attempted for content extraction.
+                usage = _merge_stream_usage(start_usage, delta_output_tokens)
+                self.last_usage = usage
+
+                response = final_message
+                if response is None:
+                    return {
+                        "text": "".join(text_parts),
+                        "tool_calls": [],
+                        "usage": usage,
+                    }
+
+                normalized = _normalize_anthropic_tool_response(response, usage)
+                if not normalized.get("text"):
+                    normalized["text"] = "".join(text_parts)
+                return normalized
+
+        response = self.client.messages.create(**kwargs)
+        usage = _normalize_anthropic_usage(getattr(response, "usage", None))
         self.last_usage = usage
-
-        # Normalize tool calls from the final message content.
-        response = final_message
-        if response is None:
-            return {"text": "".join(text_parts), "tool_calls": [], "usage": usage}
-
-        normalized = _normalize_anthropic_tool_response(response, usage)
-        if not normalized.get("text"):
-            normalized["text"] = "".join(text_parts)
-        return normalized
+        return _normalize_anthropic_tool_response(response, usage)
 
     def format_tool_result_messages(
         self,
@@ -541,7 +548,9 @@ class TFModel:
         # Local models don't have native tool calling; enforce strict JSON output.
         augmented = list(chat_template)
         tool_spec = (
-            _STRICT_TOOL_JSON_SYSTEM + "\n\n" + _tools_to_strict_json_spec(tools)
+            lib.TextProtocol.STRICT_TOOL_JSON_SYSTEM
+            + "\n\n"
+            + lib.TextProtocol.tools_to_strict_json_spec(tools)
         )
 
         if augmented and augmented[0].get("role") == "system":
@@ -566,7 +575,7 @@ class TFModel:
         )
 
         raw = results[0]["generated_text"][-1]["content"]
-        parsed = _parse_strict_tool_json(raw)
+        parsed = lib.TextProtocol.parse_strict_tool_json(raw)
         self.last_usage = None
         return {
             "text": parsed.get("text", ""),
@@ -712,6 +721,77 @@ def _merge_stream_usage(start_usage: Any, delta_output_tokens: int) -> Optional[
     return result or None
 
 
+def anthropic_split_messages(
+    chat_template: List[Dict[str, Any]],
+) -> tuple[List[str], List[Dict[str, Any]]]:
+    system_parts: List[str] = []
+    messages: List[Dict[str, Any]] = []
+    for msg in chat_template:
+        if msg["role"] == "system":
+            system_parts.append(msg["content"])
+        else:
+            messages.append(msg)
+    return system_parts, messages
+
+
+def anthropic_system_param(
+    system_parts: List[str], prompt_caching: bool
+) -> Union[str, List[Dict[str, Any]]]:
+    if prompt_caching:
+        # Cache only the first (static) system block; later blocks are dynamic.
+        blocks = [
+            {
+                "type": "text",
+                "text": system_parts[0],
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        blocks += [{"type": "text", "text": p} for p in system_parts[1:]]
+        return blocks
+    return "\n\n".join(system_parts)
+
+
+def anthropic_apply_message_cache_breakpoint(
+    messages: List[Dict[str, Any]], prompt_caching: bool
+) -> List[Dict[str, Any]]:
+    if not prompt_caching or len(messages) < 2:
+        return messages
+
+    updated = list(messages)
+
+    # Add a cache breakpoint on the penultimate user message so the growing
+    # tool-call / tool-result history is served from cache on each iteration.
+    n_user = 0
+    for i in range(len(updated) - 1, -1, -1):
+        if updated[i]["role"] == "user":
+            n_user += 1
+            if n_user == 2:
+                m = updated[i]
+                c = m.get("content", "")
+                if isinstance(c, str):
+                    # Convert to block format so cache_control can be attached.
+                    updated[i] = dict(
+                        m,
+                        content=[
+                            {
+                                "type": "text",
+                                "text": c,
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        ],
+                    )
+                elif isinstance(c, list) and c:
+                    last = c[-1]
+                    if isinstance(last, dict) and "cache_control" not in last:
+                        new_c = c[:-1] + [
+                            {**last, "cache_control": {"type": "ephemeral"}}
+                        ]
+                        updated[i] = dict(m, content=new_c)
+                break
+
+    return updated
+
+
 def _openai_tool_to_anthropic_tool(tool: Dict[str, Any]) -> Dict[str, Any]:
     fn = tool["function"]
     return {
@@ -784,98 +864,6 @@ def _normalize_anthropic_tool_response(
     }
 
 
-_STRICT_TOOL_JSON_SYSTEM = """\
-You are a coding agent with access to tools.
-
-When you want to use a tool, you MUST respond with exactly one JSON object and nothing else.
-The JSON object MUST match this schema:
-{
-  \"text\": string,              # optional natural language to show to user (can be empty)
-  \"tool_calls\": [
-    {
-      \"id\": string,
-      \"name\": string,
-      \"arguments\": object
-    }
-  ]
-}
-
-If you do not need tools, respond with exactly one JSON object of the same form with tool_calls=[] and put your final answer in text.
-Do not wrap in markdown fences. Do not output any other keys.
-"""
-
-
-def _tools_to_strict_json_spec(tools: List[Dict[str, Any]]) -> str:
-    # Tools are passed in OpenAI format. We embed only the essentials to reduce tokens.
-    lines = ["AVAILABLE TOOLS (names + JSON schemas):"]
-    for t in tools or []:
-        fn = (t or {}).get("function") or {}
-        name = fn.get("name")
-        params = fn.get("parameters")
-        desc = fn.get("description", "")
-        if not name or params is None:
-            continue
-        lines.append(f"- {name}: {desc}".strip())
-        lines.append(json.dumps(params, ensure_ascii=False))
-    return "\n".join(lines).strip()
-
-
-def _parse_strict_tool_json(raw: str) -> Dict[str, Any]:
-    """Parse the strict tool-call JSON object.
-
-    Some providers occasionally return multiple JSON objects concatenated
-    (e.g. one per candidate). In that case we accept the *first* JSON object
-    and ignore trailing data.
-    """
-
-    s = (raw or "").strip()
-    try:
-        obj = json.loads(s)
-    except Exception:
-        # Try to decode just the first JSON value (tolerate trailing data).
-        try:
-            decoder = json.JSONDecoder()
-            obj, end = decoder.raw_decode(s)
-            # If raw_decode succeeded but didn't consume all input, ignore the rest.
-            _ = end
-        except Exception as exc:
-            # Strict mode: fail closed so the agent doesn't silently skip tool calls.
-            raise ValueError(
-                "Model did not return strict tool-call JSON. "
-                "Expected a single JSON object with keys: text, tool_calls. "
-                f"Raw output starts with: {s[:200]!r}"
-            ) from exc
-
-    if not isinstance(obj, dict):
-        raise ValueError(
-            "Model returned JSON but not an object. "
-            f"Got: {type(obj).__name__}. Raw output starts with: {s[:200]!r}"
-        )
-
-    text = obj.get("text")
-    if not isinstance(text, str):
-        text = ""
-
-    tool_calls_in = obj.get("tool_calls")
-    tool_calls: List[Dict[str, Any]] = []
-    if isinstance(tool_calls_in, list):
-        for i, call in enumerate(tool_calls_in):
-            if not isinstance(call, dict):
-                continue
-            cid = call.get("id")
-            name = call.get("name")
-            args = call.get("arguments")
-            if not isinstance(cid, str) or not cid:
-                cid = f"call_{i+1}"
-            if not isinstance(name, str) or not name:
-                continue
-            if not isinstance(args, dict):
-                args = {}
-            tool_calls.append({"id": cid, "name": name, "arguments": args})
-
-    return {"text": text, "tool_calls": tool_calls}
-
-
 def _merge_system_with_user(
     chat_template: List[Dict[str, str]]
 ) -> List[Dict[str, str]]:
@@ -909,8 +897,8 @@ def _merge_system_with_user(
     return out
 
 
-ALLOWED_MODEL_TYPES = (OpenAIModel, OpenAICompModel, AnthropicModel, ArgoModel, TFModel)
-Model = Union[OpenAIModel, OpenAICompModel, AnthropicModel, ArgoModel, TFModel]
+ALLOWED_MODEL_TYPES = (OpenAICompModel, AnthropicModel, ArgoModel, TFModel)
+Model = Union[OpenAICompModel, AnthropicModel, ArgoModel, TFModel]
 
 
 def set_neural_model(model: Union[Path, str], reasoning: bool = False) -> Model:
@@ -920,7 +908,7 @@ def set_neural_model(model: Union[Path, str], reasoning: bool = False) -> Model:
         return TFModel(Path(model_str))
 
     if model.lower().startswith("openai-"):
-        return OpenAIModel(model[len("openai-"):])
+        return OpenAICompModel(model[len("openai-"):], profile="openai")
 
     if model.lower().startswith("argo-"):
         return ArgoModel(model[len("argo-"):])
@@ -929,7 +917,7 @@ def set_neural_model(model: Union[Path, str], reasoning: bool = False) -> Model:
         return AnthropicModel(model[len("anthropic-"):], reasoning=reasoning)
 
     if model.lower().startswith("oaic-"):
-        return OpenAICompModel(model[len("oaic-"):])
+        return OpenAICompModel(model[len("oaic-"):], profile="oaic")
 
     raise ValueError(
         f"Unknown model '{model}'. Use a recognized prefix: "

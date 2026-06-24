@@ -43,6 +43,22 @@ class AgentTool:
         self.parameters = parameters
         self.enabled = enabled
 
+    @staticmethod
+    def resolve_within_root(root: Path, target: str) -> Path:
+        root = root.resolve()
+        candidate = Path(target)
+        if not candidate.is_absolute():
+            candidate = (root / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            raise ValueError(f"Path escapes working directory: {target}")
+
+        return candidate
+
     def run(self, args: Dict[str, Any]) -> str:
         raise NotImplementedError(f"{self.name}.run() is not implemented")
 
@@ -61,22 +77,6 @@ class AgentTool:
             f"- {self.name}: {self.description}\n"
             f"  JSON schema: {json.dumps(self.parameters, ensure_ascii=False)}"
         )
-
-
-def _resolve_within_root(root: Path, target: str) -> Path:
-    root = root.resolve()
-    candidate = Path(target)
-    if not candidate.is_absolute():
-        candidate = (root / candidate).resolve()
-    else:
-        candidate = candidate.resolve()
-
-    try:
-        candidate.relative_to(root)
-    except ValueError:
-        raise ValueError(f"Path escapes working directory: {target}")
-
-    return candidate
 
 
 class ReadTool(AgentTool):
@@ -130,7 +130,7 @@ class ReadTool(AgentTool):
 
         if self.root is not None:
             try:
-                path = str(_resolve_within_root(self.root, path))
+                path = str(self.resolve_within_root(self.root, path))
             except Exception as exc:
                 return f"Error: {exc}"
 
@@ -218,7 +218,7 @@ class GlobTool(AgentTool):
             base = self.root
             if root_arg:
                 try:
-                    base = _resolve_within_root(self.root, root_arg)
+                    base = self.resolve_within_root(self.root, root_arg)
                 except Exception as exc:
                     return f"Error: {exc}"
         else:
@@ -236,7 +236,7 @@ class GlobTool(AgentTool):
             try:
                 if self.root is not None:
                     # Ensure bounded matches can't escape.
-                    p = _resolve_within_root(self.root, str(p))
+                    p = self.resolve_within_root(self.root, str(p))
                 else:
                     p = p.resolve()
             except Exception:
@@ -319,7 +319,7 @@ class BashTool(AgentTool):
             enabled=True,
         )
 
-    def _is_safe(self, command: str) -> Optional[str]:
+    def validate_command(self, command: str) -> Optional[str]:
         if not self.bounded:
             return None
 
@@ -348,7 +348,7 @@ class BashTool(AgentTool):
         if not command:
             return "Error: missing required argument 'command'"
 
-        err = self._is_safe(command)
+        err = self.validate_command(command)
         if err:
             return f"Error: {err}"
 
@@ -412,7 +412,7 @@ class EditTool(AgentTool):
         self.root = Path(root).resolve() if root is not None else None
 
     @staticmethod
-    def _snippet(text: str, start: int, end: int, context: int = 80) -> str:
+    def snippet(text: str, start: int, end: int, context: int = 80) -> str:
         """Return a compact snippet around [start:end]."""
         left = max(0, start - context)
         right = min(len(text), end + context)
@@ -431,7 +431,7 @@ class EditTool(AgentTool):
 
         if self.root is not None:
             try:
-                path = str(_resolve_within_root(self.root, path))
+                path = str(self.resolve_within_root(self.root, path))
             except Exception as exc:
                 return f"Error: {exc}"
 
@@ -465,7 +465,7 @@ class EditTool(AgentTool):
                     "match_count": count,
                     "old_len": len(old),
                     "new_len": len(new),
-                    "before_snippet": self._snippet(content_before, start, end),
+                    "before_snippet": self.snippet(content_before, start, end),
                     "oldText": old,
                     "newText": new,
                 }
@@ -487,7 +487,7 @@ class EditTool(AgentTool):
             new = r["newText"]
             pos = content_after.find(new)
             if pos >= 0:
-                r["after_snippet"] = self._snippet(content_after, pos, pos + len(new))
+                r["after_snippet"] = self.snippet(content_after, pos, pos + len(new))
             else:
                 r["after_snippet"] = "(newText not found after write)"
 
@@ -545,7 +545,7 @@ class WriteTool(AgentTool):
 
         if self.root is not None:
             try:
-                path = str(_resolve_within_root(self.root, path))
+                path = str(self.resolve_within_root(self.root, path))
             except Exception as exc:
                 return f"Error: {exc}"
 

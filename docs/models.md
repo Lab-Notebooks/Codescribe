@@ -1,70 +1,148 @@
 # Model backends
 
-Codescribe selects an LLM backend based on the prefix of the `-m/--model` argument.
+This page documents the current backend selection logic in
+`codescribe/lib/_llm.py`.
 
-## Common environment variable
+## Supported model inputs
 
-- `CODESCRIBE_MAX_TOKENS` — maximum output tokens the model may generate per reply.
-  Applies to all backends. Default: `24576`.
-  Example: `export CODESCRIBE_MAX_TOKENS=8192`
+`set_neural_model(model, reasoning=False)` currently accepts:
 
-## Recommended: OpenAI-compatible endpoints (`oaic-*`)
+- `openai-*`
+- `oaic-*`
+- `anthropic-*`
+- `argo-*`
+- a filesystem path to a local Transformers checkpoint
 
-Use this when you have **any OpenAI-compatible `/v1` API** (self-hosted or managed). This is the most portable backend and is generally the recommended default.
+If none of these match, CodeScribe raises `ValueError`.
 
-- Model prefix: `oaic-...` (required)
-- Example:
+## Common output-token setting
 
-```bash
-code-scribe translate <files...> -m oaic-llama3.1 -p seed_prompt.toml
+All backends read `CODESCRIBE_MAX_TOKENS`, though defaults differ slightly by
+backend implementation:
+
+- `OpenAICompModel`: default `24576`
+- `AnthropicModel`: default `32768`
+
+## `openai-*`
+
+Backend class:
+
+- `OpenAICompModel(..., profile="openai")`
+
+Required environment variable:
+
+- `OPENAI_API_KEY`
+
+Behavior:
+
+- uses OpenAI chat completions,
+- supports tool use through the unified `chat_with_tools(...)` path,
+- normalizes usage including reasoning-token counts when the provider exposes
+  them.
+
+## `oaic-*`
+
+Backend class:
+
+- `OpenAICompModel(..., profile="oaic")`
+
+Required environment variables:
+
+- `OPENAI_COMP_BASEURL`
+- `OPENAI_COMP_PROVIDER`
+- `OPENAI_COMP_APIKEY`
+
+Behavior:
+
+- targets an OpenAI-compatible API,
+- uses the same client code path as hosted OpenAI with a different profile,
+- supports tool use through the same `chat_with_tools(...)` interface.
+
+## `anthropic-*`
+
+Backend class:
+
+- `AnthropicModel`
+
+Required environment variable:
+
+- `ANTHROPIC_API_KEY`
+
+Optional environment variables:
+
+- `ANTHROPIC_BASE_URL`
+- `CODESCRIBE_ANTHROPIC_STREAMING`
+- `CODESCRIBE_ANTHROPIC_CACHE`
+- `CODESCRIBE_AGENT_REASONING`
+
+Current behavior:
+
+- prefers streaming API calls when enabled,
+- supports prompt caching,
+- supports tool use through Anthropic tool APIs,
+- can relay Anthropic thinking blocks back into the next turn.
+
+### Reasoning support
+
+`--reason` on `agent` and `loop` is passed into `set_neural_model(..., reasoning=True)`.
+
+For `AnthropicModel`, reasoning can be enabled by either:
+
+- the CLI/API `reason=True`, or
+- `CODESCRIBE_AGENT_REASONING=1`
+
+When enabled, the model is configured with:
+
+```python
+{"type": "adaptive", "display": "summarized"}
 ```
 
-Environment variables:
+Returned thinking blocks are preserved and echoed back in
+`format_tool_result_messages(...)` as required by the Anthropic API.
 
-- `OPENAI_COMP_BASEURL` (must include `/v1`, e.g. `http://localhost:11434/v1`)
-- `OPENAI_COMP_PROVIDER` (a label used for routing/auth policy, e.g. `ollama`, `alcf-inference`)
-- `OPENAI_COMP_APIKEY` (required by the current implementation; may be a placeholder for local endpoints)
+## `argo-*`
 
-Tool calling:
+Backend class:
 
-- Supports **native tool calling** (so agent/loop can use tools without the text fallback protocol).
+- `ArgoModel`
 
-## OpenAI hosted (`openai-*`)
+Required environment variables:
 
-- Model prefix: `openai-...`
-- Env var: `OPENAI_API_KEY`
-- Tool calling: **native tool calling supported**
+- `ARGO_API_ENDPOINT`
+- `ARGO_USER`
 
-## Anthropic (`anthropic-*`)
+Current behavior:
 
-- Model prefix: `anthropic-...`
-- Env vars:
-  - `ANTHROPIC_API_KEY`
-  - `ANTHROPIC_BASE_URL` (optional; override API base URL, e.g. for a proxy)
-- Tool calling: **native tool calling supported**
-- Note: both `chat()` and `chat_with_tools()` prefer the streaming API
-  (`client.messages.stream`) and fall back to non-streaming if the SDK or
-  provider does not support it.
-- Adaptive thinking: pass `--reason` to `agent` or `loop` to enable extended
-  thinking. Supported on `claude-sonnet-4-6` and `claude-opus-*`. Silently
-  ignored on all other backends. Set `CODESCRIBE_AGENT_REASONING=1` as a
-  scripting/CI fallback.
+- sends requests with `requests.post(...)`,
+- does not have provider-native structured tool calls,
+- emulates tool use by injecting a strict JSON tool protocol prompt and parsing
+  the returned JSON.
 
-## ARGO (`argo-*`)
+## Local Transformers checkpoint path
 
-ARGO is supported primarily for environments where the ARGO endpoint is available.
+Backend class:
 
-- Model prefix: `argo-...`
-- Env vars: `ARGO_USER`, `ARGO_API_ENDPOINT`
-- Tool calling: **no provider-native tool calling**; the backend uses a
-  **strict-JSON emulation** — tool schemas are injected into the system prompt
-  and the model is required to respond with a JSON object (`text` + `tool_calls`).
+- `TFModel`
 
-## Local Hugging Face / Transformers checkpoint (path)
+Requirements:
 
-If `-m` is a filesystem path, Codescribe uses a local Transformers pipeline.
+- pass a model argument that is an existing filesystem path,
+- install optional dependencies for local Transformers use.
 
-- Model argument: path to a checkpoint directory
-- Tool calling: **no provider-native tool calling**; same **strict-JSON emulation**
-  as ARGO — schemas are injected into the system prompt and the model must
-  return a structured JSON object.
+Current behavior:
+
+- loads a text-generation pipeline from the checkpoint path,
+- merges any system prompt into the first user message,
+- emulates tool use through the same strict JSON protocol used by `ArgoModel`.
+
+## Tool-calling note
+
+Older docs sometimes described only provider-native tool support. The current
+agent abstraction is broader:
+
+- OpenAI-compatible and Anthropic backends use provider-native tool APIs.
+- ARGO and local Transformers backends emulate tool calling through strict JSON
+  prompting in `_llm.py`.
+
+All of these backends expose the same `chat_with_tools(...)` interface to the
+agent.

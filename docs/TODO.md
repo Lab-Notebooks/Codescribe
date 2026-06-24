@@ -1,86 +1,53 @@
 # TODO
 
-This document tracks *open* work items. It intentionally avoids duplicating
-implementation details that are easy to drift; prefer pointing to code and the
-agent internals doc.
+Open follow-ups that still appear relevant to the current code.
 
-See also: `docs/agent.md`.
+## Agent/runtime
 
-## Agent efficiency
+- Add tests for `Agent.run()` stop conditions:
+  - final text
+  - max iterations
+  - tool budget exhaustion
+  - repeated-call blocking
+  - invalid tool-argument JSON recovery
+- Add direct tests for `RunResult`, `ToolResult`, and `RejectedCall` so future
+  refactors do not silently change loop semantics.
+- Consider stronger context-compaction beyond the current workspace summary plus
+  output truncation.
 
-### Context compaction
+## Loop
 
-- Add deterministic rolling context compaction in `codescribe/lib/_agent.py`.
-- Preserve system prompt and recent turns while summarizing older history.
-- Add configurable thresholds, e.g. `compact_context`, `compact_threshold_tokens`, and `compact_keep_last_messages`.
-- Apply compaction in both text-protocol and native-tool execution loops.
-- Ensure summaries are local/deterministic rather than model-generated on the first pass.
+- Add tests for `PromptLoopRunner` early-exit behavior:
+  - execution `STATUS: COMPLETE`
+  - empty review `pending` and blocker
+- Decide whether review should always run after execution, or whether the
+  current “skip review on STATUS: COMPLETE” behavior is final API.
+- Document or implement a clearer crash-resume story for `.codescribe/loop/`
+  artifacts.
 
-### Tool output management
+## Tools
 
-Already implemented:
+- Tighten bounded `bash` safety. It still uses `shell=True` after validation.
+- Add tests for path-bounding edge cases in `ReadTool`, `GlobTool`, `EditTool`,
+  and `WriteTool`.
+- Consider whether `EditTool` should explicitly reject overlapping/nested edits
+  instead of relying mainly on exact-match uniqueness.
 
-- Tool outputs are truncated before reinsertion into the model context.
-  (See `_truncate_for_model()` in `codescribe/lib/_agent.py`.)
+## Models
 
-Still open / possible improvements:
-
-- Tool-specific compact summaries for `read` and `bash`.
-- Optional paging/chunking for large file and command outputs.
-- Optionally store full tool outputs outside prompt context and feed only summaries back.
-
-## Native tool execution and backend robustness
-
-- Add smoke tests for native tool execution:
-  - `OpenAIModel`
+- Add backend smoke tests for:
   - `OpenAICompModel`
   - `AnthropicModel`
-- Verify fallback behavior remains correct for backends without native tool calling:
   - `ArgoModel`
   - `TFModel`
-- Harden response normalization for OpenAI-compatible providers with partial/inconsistent tool-calling support.
+- Decide whether `supports_native_tools=True` is the right name for backends
+  that emulate tool calls through strict JSON prompting.
+- Document the practical support matrix for reasoning/token accounting across
+  providers.
 
-Already documented:
+## Docs
 
-- The native-tools vs text-protocol split is described in `docs/agent.md`.
-
-## Bounded tool policy
-
-- Consider tightening bounded `bash` validation rules (allowlist and argument checks).
-- Consider disabling commands with high variance if not needed.
-- Investigate deterministic sandboxing options for bounded mode.
-- Evaluate whether bounded mode should prefer structured tools over raw shell access.
-
-## Reasoning / thinking support
-
-### OpenAI Responses API (reasoning summaries)
-
-The current `OpenAIModel` and `OpenAICompModel` use the Chat Completions API
-(`chat.completions.create`), which only surfaces `completion_tokens_details.reasoning_tokens`
-as a count — no reasoning text.
-
-OpenAI exposes actual reasoning summaries via the **Responses API**
-(`client.responses.create`), which returns a `{"type":"reasoning","summary":[...]}` output
-item when `reasoning.summary="auto"` is set. This is a different request/response shape
-(input array, output items, `previous_response_id` for history) and requires a new model
-class (e.g. `OpenAIResponsesModel`) rather than changing the existing Chat Completions
-wrapper. Affects reasoning-capable models: `o3`, `o4-mini`, `gpt-5.x`.
-
-Already implemented: `reasoning_tokens` count extraction from
-`completion_tokens_details.reasoning_tokens` (see `_llm.py`).
-
-## Observability
-
-Already implemented:
-
-- Usage accounting when providers return token counts, plus heuristic estimates in
-  fallback mode (see `docs/agent.md`).
-
-Still open / possible improvements:
-
-- Optional “trace” mode emitted by the runtime (brief plan + tool calls + short
-  result summaries), without forcing verbose Thought/Action/Observation formatting.
-- Model-native tool-path metrics / debug logging improvements (beyond the current
-  diagnostics sinks).
-- History compaction informed by tool/result structure rather than raw message count.
-- Consider a dual-layer memory model: compact working context + external full transcript.
+- Keep docs focused on code-backed behavior and remove speculative framework
+  comparisons unless they are needed and maintained.
+- Reconcile `README.rst` examples and defaults with the current CLI and loop
+  implementation.

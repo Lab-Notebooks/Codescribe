@@ -1,117 +1,211 @@
-# Tools (`codescribe/lib/_tools.py`)
+# Tools
 
-This document describes the agent tool implementations used by Codescribe.
-The agent loop lives in `codescribe/lib/_agent.py`; the concrete tool
-implementations live in `codescribe/lib/_tools.py`.
+This page documents the current tool implementations in
+`codescribe/lib/_tools.py`.
 
-## Overview
+## Tool set
 
-Tools are small, schema-described functions the model can invoke:
+CodeScribe currently provides five tools:
 
-- `read`: read file contents (optionally with line offsets/limits)
-- `glob`: list files via glob patterns
-- `bash`: run shell commands (bounded allowlist mode supported)
-- `edit`: exact text replacement edits
-- `write`: write (create/overwrite) a whole file
+- `read`
+- `glob`
+- `bash`
+- `edit`
+- `write`
 
-Tools share a common base class: `AgentTool`.
+All tools inherit from `AgentTool`.
 
 ## `AgentTool`
 
-`AgentTool` carries:
+Base fields:
 
 - `name`
 - `description`
-- `parameters` (JSON-schema-like object used for tool calling)
+- `parameters`
 - `enabled`
 
-It also provides:
+Base helpers:
 
-- `to_openai_tool()`: converts the tool to an OpenAI-style function schema.
-- `describe_for_prompt()`: text description + schema for fallback/text protocol prompting.
+- `run(args)`
+- `to_openai_tool()`
+- `describe_for_prompt()`
+- `resolve_within_root(root, target)`
 
-## Path bounding: `_resolve_within_root()`
+`resolve_within_root(...)` is the main path-bounding primitive used by file
+operations.
 
-When a tool is created with a `root`, file paths are resolved under that root.
-Any attempt to escape (e.g. `../..` traversal) is rejected.
+## `read`
 
-This is the core safety primitive for bounded mode.
+Class:
 
-## `ReadTool` (`read`)
+- `ReadTool`
 
-Reads a text file with optional slicing:
+Arguments:
 
-- `offset`: 1-indexed starting line
-- `limit`: max number of lines
-- `with_line_numbers`: defaults to `1` (prefixes lines as `0001: ...`)
+- `path` required
+- `offset` optional, 1-indexed
+- `limit` optional
+- `with_line_numbers` optional, defaults to `1`
 
-Bounded behavior:
+Behavior:
 
-- if constructed with `root=...`, reads are restricted to the working tree.
+- reads text files with optional slicing,
+- returns a header containing the resolved path and line range when line numbers
+  are enabled,
+- prefixes each returned line with a stable line number.
 
-## `GlobTool` (`glob`)
+When bounded, the file path must resolve within the configured root.
 
-Lists files matching a glob pattern (supports `**`).
+## `glob`
 
-Key args:
+Class:
 
-- `pattern` (required)
-- `root` (optional): sub-root for the search
-- `include_dirs` (0/1)
-- `limit` (default 2000)
+- `GlobTool`
 
-In bounded mode, results are kept within the configured root and returned
-relative to the chosen search base.
+Arguments:
 
-## `BashTool` (`bash`)
+- `pattern` required
+- `root` optional
+- `include_dirs` optional
+- `limit` optional, default `2000`
 
-Executes shell commands and returns a normalized text block:
+Behavior:
 
-- `exit_code: N`
-- `STDOUT:`
-- `STDERR:`
+- uses Python glob with recursive `**` support,
+- returns newline-separated matches,
+- returns paths relative to the selected search base when possible,
+- filters out directories unless `include_dirs=1`.
 
-Bounded behavior (when `bounded=True`):
+When bounded, both the search root and returned matches are constrained to the
+configured root.
 
-- rejects common shell metacharacters (pipes, redirects, `$`, etc.)
-- allows only a command allowlist (defaults include `ls`, `find`, `grep`, `git`, ...)
-- the allowlist can be extended by loop/task metadata (see `docs/loop.md`)
+## `bash`
 
-Note: current implementation still uses `shell=True` even in bounded mode;
-boundedness is enforced by pre-validation.
+Class:
 
-## `EditTool` (`edit`)
+- `BashTool`
 
-Performs **exact** text replacements.
+Arguments:
+
+- `command` required
+- `timeout` optional
+
+Return format:
+
+```text
+exit_code: 0
+STDOUT:
+...
+STDERR:
+...
+```
+
+### Bounded bash
+
+When `bounded=True`, `validate_command(...)` currently:
+
+- rejects commands containing any of these characters:
+  - `| & ; > < \` $`
+- parses the command with `shlex.split(...)`
+- requires the executable name to appear in the allowlist.
+
+Default allowlist:
+
+- `ls`
+- `pwd`
+- `find`
+- `grep`
+- `head`
+- `tail`
+- `wc`
+- `git`
+- `test`
+- `echo`
+- `sed`
+
+Important current detail:
+
+- even bounded bash still runs through `subprocess.run(..., shell=True)`.
+  Safety comes from pre-validation, not from shell removal or process sandboxing.
+
+## `edit`
+
+Class:
+
+- `EditTool`
 
 Arguments:
 
 - `path`
-- `edits`: list of `{oldText, newText}`
+- `edits`, a list of objects with:
+  - `oldText`
+  - `newText`
 
-Rules:
+Behavior:
 
-- each `oldText` must match **exactly once** in the original file
+- reads the full original file,
+- requires every `oldText` to match exactly once in the original content,
+- applies replacements by repeated string replacement on the evolving output,
+- writes the updated file,
+- returns a JSON report with verification snippets.
 
-The tool writes the updated file and returns a JSON report with before/after
-snippets to make it easier for an agent to verify changes.
+Important current behavior:
 
-## `WriteTool` (`write`)
+- uniqueness is checked against the original file content for each requested
+  edit, not incrementally after earlier edits.
+- the tool itself does not explicitly detect overlapping or nested edit regions;
+  it relies on exact-match uniqueness and agent discipline.
 
-Creates or overwrites a file with full content.
+## `write`
+
+Class:
+
+- `WriteTool`
 
 Arguments:
 
 - `path`
 - `content`
 
-In bounded mode, the write path must stay within the tool root.
+Behavior:
+
+- creates parent directories as needed,
+- creates or overwrites the target file,
+- returns a short confirmation string including byte count.
+
+When bounded, the target path must resolve within the configured root.
 
 ## Toolset constructors
 
-- `make_tools(root, bash_allow=None)`: bounded default toolset used by loop mode
-  (`read`, `glob`, bounded `bash`, `edit`, `write`).
-- `make_readonly_tools(root, bash_allow=None)`: bounded read-only set
-  (`read`, `glob`, bounded `bash`).
+### `make_tools(root, bash_allow=None)`
 
-`DEFAULT_TOOLS` is a convenience list built from `make_tools(Path.cwd())`.
+Returns the default bounded toolset:
+
+- `read`
+- `glob`
+- bounded `bash`
+- `edit`
+- `write`
+
+`bash_allow` extends the default bounded-bash allowlist.
+
+### `make_readonly_tools(root, bash_allow=None)`
+
+Returns the bounded read-only toolset:
+
+- `read`
+- `glob`
+- bounded `bash`
+
+Important correction:
+
+- “read-only” here means no `edit` or `write`. It still includes bounded `bash`.
+
+### `DEFAULT_TOOLS`
+
+`DEFAULT_TOOLS` is built at import time as:
+
+- `make_tools(Path.cwd().resolve())`
+
+In practice, most command paths construct their own rooted toolsets rather than
+relying directly on this module-level default.

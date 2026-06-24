@@ -1,201 +1,158 @@
-# Command layer (`codescribe/lib/_cmd.py`)
+# Command layer
 
-This module is the bridge between the CLI entry points and the library
-internals. Each `prompt_*` function corresponds to one CLI command and is
-responsible for constructing the model input, invoking the model or agent,
-and writing outputs back to disk.
+This page documents the current command implementations in `codescribe/lib/_cmd.py`
+and how they are exposed through the CLI.
 
-If you're modifying behaviour, treat the code as authoritative:
-`codescribe/lib/_cmd.py`.
+## CLI commands
 
-## Role in the call stack
+The top-level Click group is `code-scribe`.
 
-```
-CLI (code-scribe <cmd>)
-  └── prompt_<cmd>(...)          # _cmd.py — assembles context, calls lib
-        ├── lib.set_neural_model  # _llm.py — constructs backend
-        ├── lib.Agent             # _agent.py — tool-using agent loop
-        └── lib.make_*_tools      # _tools.py — bounded/unbounded tool sets
-```
+Current subcommands in `codescribe/cli/_commands.py`:
 
-The cmd layer does not implement any LLM or tool logic itself.
+- `index`
+- `draft`
+- `translate`
+- `generate`
+- `update`
+- `inspect`
+- `format`
+- `agent`
+- `loop`
 
----
+`codescribe/api/_commands.py` is a thin wrapper layer over these library entry
+points.
 
 ## `prompt_translate`
 
-**CLI command**: `code-scribe translate`
+File: `codescribe/lib/_cmd.py`
 
-Drives the Fortran-to-C++ translation loop over a file mapping produced by
-`code-scribe draft`.
+Purpose:
 
-### Inputs
+- Perform prompt-based Fortran-to-C++ translation.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `mapping` | `List[List[str]]` | Six parallel lists: `[fsource, csource, finterface, cdraft, promptfile, cheader]` |
-| `seed_prompt` | `Path` | TOML chat template used as the conversation seed |
-| `model` | `str \| Path` | Model identifier (optional; skips inference if omitted) |
+Current behavior:
 
-### Behaviour
+- Accepts a six-list mapping produced by `create_src_mapping(...)`.
+- Loads the TOML chat template from `seed_prompt`.
+- For each source tuple:
+  - skips work if the C++ output file already exists,
+  - strips Fortran comment lines before prompt injection,
+  - appends `<source>...</source>` to the last user turn,
+  - optionally appends `<draft>...</draft>` if a `.scribe` draft exists,
+  - calls `model.chat(...)`,
+  - extracts `<csource>`, `<cheader>`, and `<fsource>` blocks from the reply.
+- Restores the last user message after each file so the seed prompt does not
+  accumulate per-file state.
 
-For each file tuple:
-
-1. **Skip if the output already exists** — if `csource` is present on disk the
-   file is skipped. This makes the loop idempotent and safe to resume.
-2. **Fortran comment stripping** — lines beginning with `c`, `!!`, or `!`
-   (case-insensitive, excluding `complex`) are dropped before the source is
-   injected into the prompt. This reduces noise for the model.
-3. **Context injection** — the Fortran source is appended inside `<source>`
-   tags; if a `.scribe` draft file exists it is appended inside `<draft>`
-   tags. Both are added to the last user turn of the chat template.
-4. **XML output parsing** — the model response is searched for three tagged
-   regions: `<csource>`, `<cheader>`, and `<fsource>`. Matched regions are
-   written to the corresponding output files. If a tag is absent the raw
-   model output is written instead.
-5. **Template reset** — after each file the last user turn's content is
-   restored from a cached copy so the next file starts from a clean template.
-
----
+This is a prompt-driven workflow, not an agentic one.
 
 ## `prompt_inspect`
 
-**CLI command**: `code-scribe inspect`
+Purpose:
 
-Runs an inspection agent in bounded read-only mode over a list of files or
-directories.
+- Run a bounded read-only agent over a set of files and answer a query.
 
-### Inputs
+Current behavior:
 
-| Parameter | Type | Description |
-|---|---|---|
-| `filelist` | `List[Path]` | Files or directories to inspect |
-| `query_prompt` | `str` | Natural-language query to answer |
-| `file_index` | `Dict[str, str]` | Optional project index (symbol → file path) |
-| `model` | `str \| Path` | Required; no default |
-| `verbose` | `bool` | Stream agent diagnostics to stdout |
+- Requires `model`.
+- Resolves all requested paths and computes a common bounded root.
+- Builds a task listing the files and the query.
+- Uses `lib.make_readonly_tools(common_root)`.
 
-### Behaviour
+Important correction:
 
-1. **Common root resolution** — directories contribute themselves; files
-   contribute their parent directory. The common root of all entries becomes
-   the agent's bounded working directory.
-2. **Task assembly** — the agent is given a structured task listing the
-   relative file paths, the filtered project index (if any), and the query.
-   It is instructed to finish with a `<final_answer>` block.
-3. **Read-only tools** — the agent is created with `lib.make_readonly_tools`,
-   which excludes `edit` and `write`. `bash` is also excluded; only `read`
-   and `glob` are available.
-4. The agent's final answer is printed to stdout.
+- `make_readonly_tools(...)` currently includes `read`, `glob`, and bounded
+  `bash`. It is read-only with respect to files, but not bash-free.
 
----
+The final answer is printed to stdout.
 
 ## `prompt_generate`
 
-**CLI command**: `code-scribe generate`
+Purpose:
 
-Generates new source files from a seed prompt or a natural-language string.
+- Generate one or more files from a prompt.
 
-### Inputs
+Current behavior:
 
-| Parameter | Type | Description |
-|---|---|---|
-| `seed_prompt` | `str \| Path` | TOML chat template **or** a plain string prompt |
-| `model` | `str \| Path` | Model identifier |
-| `reference_existing` | `List[Path]` | Files to include as read-only context |
-
-### Behaviour
-
-1. **Prompt resolution** — if `seed_prompt` is a path that exists on disk it
-   is loaded as a TOML chat template; otherwise it is treated as a
-   natural-language user message directly.
-2. **Reference injection** — each reference file is appended to the last user
-   turn wrapped in `<filename>...</filename>` tags, with an instruction not to
-   modify them.
-3. **XML output parsing** — the model response is scanned with a greedy regex
-   for any `<tag>...</tag>` pair. Each match is written to a file whose path
-   is the tag name, creating intermediate directories as needed. This allows
-   the model to generate multiple files in a single response.
-
----
+- Accepts either:
+  - a path to a TOML chat template, or
+  - a plain prompt string.
+- Prepends a system instruction requiring XML-style tagged file output.
+- Optionally injects reference files as read-only context.
+- Calls `model.chat(...)`.
+- Extracts any `<path>...</path>` pairs with a regex.
+- Writes each matched file to disk, creating directories as needed.
 
 ## `prompt_update`
 
-**CLI command**: `code-scribe update`
+Purpose:
 
-Updates existing source files in place, using a seed prompt and optional
-reference files.
+- Update one or more existing files from either a seed prompt or a natural
+  language query.
 
-### Inputs
+Current behavior:
 
-| Parameter | Type | Description |
-|---|---|---|
-| `filelist` | `List[Path]` | Files to update (written back to disk) |
-| `seed_prompt` | `Path` | TOML chat template (optional) |
-| `query_prompt` | `str` | Natural-language instruction (optional) |
-| `model` | `str \| Path` | Model identifier |
-| `reference_existing` | `List[Path]` | Read-only context files |
-
-### Behaviour
-
-Similar pipeline to `prompt_generate` with two differences:
-
-1. **Disjointness check** — raises `ValueError` if any file appears in both
-   `filelist` and `reference_existing`. This prevents the model from being
-   asked to both update and treat a file as read-only.
-2. **Existing content injection** — each target file is read and injected into
-   the prompt inside `<filename>` tags with an instruction to update it.
-   Reference files follow with a "do not edit" instruction. The model is
-   expected to return the updated content in the same tag format.
-
-Output parsing and file writing follow the same XML-tag regex as
-`prompt_generate`.
-
----
+- Requires at least one of `seed_prompt` or `query_prompt`.
+- Builds the same XML-tag output protocol used by `prompt_generate`.
+- Injects target files as editable context.
+- Injects `reference_existing` files as read-only context.
+- Rejects overlap between target and reference files.
+- Calls `model.chat(...)` and writes tagged outputs back to disk.
 
 ## `prompt_agent`
 
-**CLI command**: `code-scribe agent`
+Purpose:
 
-Runs a single open-ended tool-using agent session on an arbitrary task.
+- Run a single tool-using agent session on a task.
 
-### Inputs
+Current behavior:
 
-| Parameter | Type | Description |
-|---|---|---|
-| `task` | `str` | Natural-language task description |
-| `model` | `str \| Path` | Model identifier |
-| `agent_iterations` | `int` | Tool-call iteration budget (default 20) |
-| `verbose` | `bool` | Stream per-iteration diagnostics to stdout |
-| `logging` | `Path \| str \| None` | Path for TOML event log; empty string uses default location |
-| `reason` | `bool` | Enable adaptive thinking (Anthropic backends only) |
+- Constructs the model with `set_neural_model(model, reasoning=reason)`.
+- Optionally enables TOML event logging via `ToolLogToml`.
+- Uses `lib.make_tools(Path.cwd().resolve())`.
+- Runs `Agent(...).run(task)` and returns `str(result)`.
 
-### Behaviour
+Important correction:
 
-1. **Unbounded tools** — unlike `prompt_inspect`, the agent is created with
-   `lib.make_tools(Path.cwd())`, which includes `edit` and `write` in addition
-   to `read`, `glob`, and `bash`. The working directory root is still
-   respected for path resolution, but the command allowlist is not applied.
-2. **Optional TOML logging** — if `logging` is set, a `ToolLogToml` sink is
-   attached to the agent. Passing an empty string uses the default path
-   (`.codescribe/logs/toolusage.toml`). The log captures every `tool_start`
-   and `tool_end` event for post-run inspection.
-3. Returns the agent's final answer string (the content of the `<final_answer>`
-   block, or an error string if the iteration limit is reached).
+- The current implementation uses the bounded toolset rooted at the current
+  working directory. It is not an unbounded filesystem agent.
 
----
+CLI flags:
 
-## XML output format
+- `--agent-iterations / -niter`
+- `--verbose / -v`
+- `--log`
+- `--log-path`
+- `--reason`
 
-`prompt_generate` and `prompt_update` both rely on the model returning one or
-more files wrapped in XML-style tags:
+## `prompt_loop`
 
-```
+`loop` is implemented in `codescribe/lib/_loop.py`, not `_cmd.py`.
+It is still part of the public command layer and is exposed through:
+
+- `codescribe/cli/_commands.py: loop()`
+- `codescribe/api/_commands.py: loop()`
+- `codescribe/lib/_loop.py: prompt_loop()`
+
+See [`loop.md`](./loop.md) for behavior details.
+
+## Output conventions worth knowing
+
+### Tagged-file output
+
+`prompt_generate`, `prompt_update`, and parts of `prompt_translate` depend on
+XML-style tags in model output, for example:
+
+```text
 <path/to/file.py>
-... file contents ...
+print("hello")
 </path/to/file.py>
 ```
 
-The parsing regex is greedy (`re.DOTALL`) and matches the first occurrence of
-each tag pair. Tag names become file paths verbatim, so the model must use
-exact relative paths. Intermediate directories are created automatically.
+### Agent return value
+
+`Agent.run()` returns a `RunResult`. `prompt_agent()` converts that to a string
+before returning it to the CLI, so CLI users see either:
+
+- the final text, or
+- a stop message such as max-iteration or tool-budget exhaustion.
